@@ -9,6 +9,7 @@ export function parseKeyholder(payload) {
     const nights = numFirst(r.nights, r.numberOfNights, r.number_of_nights, diffNights(checkIn, checkOut));
     const total = numFirst(r.price, r.totalPrice, r.total_price, r.total, r.totalCost, r.cost);
     const points = numFirst(r.points, r.totalPoints, r.total_points);
+    const listedPointPrice = numFirst(r.pricePerPoint, r.pointPrice, r.price_per_point);
     return make({
       id,
       source: "DVC Rental Store",
@@ -20,7 +21,9 @@ export function parseKeyholder(payload) {
       total,
       points,
       nightly: numFirst(r.pricePerNight, r.nightlyPrice, r.nightly, div(total, nights)),
-      pointPrice: numFirst(r.pricePerPoint, r.pointPrice, r.price_per_point, div(total, points)),
+      listedPointPrice,
+      effectivePointPrice: div(total, points),
+      pointPrice: numFirst(listedPointPrice, div(total, points)),
       status: first(r.status),
       bookingUrl: first(r.bookingUrl, r.bookingURL, r.url) || (id ? `https://dvcrentalstore.com/guests/reservations/${encodeURIComponent(id)}/` : null),
     });
@@ -35,6 +38,7 @@ export function parseExternalRentalStore(rows) {
     const nights = numFirst(r.nights, diffNights(checkIn, checkOut));
     const total = numFirst(r.total, r.price, r.totalPrice);
     const points = numFirst(r.points, r.totalPoints);
+    const listedPointPrice = numFirst(r.listedPointPrice, r.pointPrice, r.pricePerPoint);
     return make({
       id,
       source: "DVC Rental Store",
@@ -46,7 +50,9 @@ export function parseExternalRentalStore(rows) {
       total,
       points,
       nightly: numFirst(r.nightly, r.pricePerNight, div(total, nights)),
-      pointPrice: numFirst(r.pointPrice, r.pricePerPoint, div(total, points)),
+      listedPointPrice,
+      effectivePointPrice: numFirst(r.effectivePointPrice, div(total, points)),
+      pointPrice: numFirst(r.pointPrice, listedPointPrice, div(total, points)),
       status: r.status || "Available",
       bookingUrl: r.bookingUrl || (id ? `https://dvcrentalstore.com/guests/reservations/${encodeURIComponent(id)}/` : null),
     });
@@ -67,7 +73,7 @@ export function parseDavids(html) {
     const checkOut = iso(match[2]);
     const nights = num(match[3]);
     const points = num(match[5]);
-    const pointPrice = num(match[6]);
+    const listedPointPrice = num(match[6]);
     const total = num(match[7]);
     const bookingUrl = links[index++] || URLS.davids;
     const id = bookingUrl.match(/\/([0-9]{5,})(?:[/?#]|$)/)?.[1] ||
@@ -83,7 +89,9 @@ export function parseDavids(html) {
       checkOut,
       nights,
       points,
-      pointPrice,
+      listedPointPrice,
+      effectivePointPrice: div(total, points),
+      pointPrice: listedPointPrice,
       total,
       nightly: div(total, nights),
       sleeps: num(match[8]),
@@ -124,7 +132,14 @@ export function parseDvcShop(html) {
 }
 
 export function fingerprint(r) {
-  return [round(r.total), round(r.nightly), round(r.pointPrice), round(r.points)].join("|");
+  return [
+    round(r.total),
+    round(r.nightly),
+    round(r.effectivePointPrice),
+    round(r.listedPointPrice),
+    round(r.pointPrice),
+    round(r.points),
+  ].join("|");
 }
 
 export function formatListing(r) {
@@ -135,7 +150,8 @@ export function formatListing(r) {
     r.checkIn && r.checkOut ? `${r.checkIn} → ${r.checkOut}` : r.checkIn,
     Number.isFinite(r.nights) ? `${r.nights} night${r.nights === 1 ? "" : "s"}` : null,
     Number.isFinite(r.nightly) ? `${money(r.nightly)}/night` : null,
-    Number.isFinite(r.pointPrice) ? `${money(r.pointPrice)}/point` : null,
+    Number.isFinite(r.points) ? `${Math.round(r.points).toLocaleString("en-US")} points` : null,
+    ...pointPriceParts(r),
     Number.isFinite(r.total) ? `${money(r.total)} total` : null,
   ].filter(Boolean).join(" | ");
 }
@@ -143,7 +159,8 @@ export function formatListing(r) {
 export function priceSummary(r) {
   return [
     Number.isFinite(r.nightly) ? `${money(r.nightly)}/night` : null,
-    Number.isFinite(r.pointPrice) ? `${money(r.pointPrice)}/point` : null,
+    Number.isFinite(r.points) ? `${Math.round(r.points).toLocaleString("en-US")} points` : null,
+    ...pointPriceParts(r),
     Number.isFinite(r.total) ? `${money(r.total)} total` : null,
   ].filter(Boolean).join(" | ");
 }
@@ -152,9 +169,26 @@ export function byId(rows) {
   return Object.fromEntries(rows.map(r => [String(r.id), r]));
 }
 
+function pointPriceParts(r) {
+  const effective = numFirst(r.effectivePointPrice, div(r.total, r.points));
+  const listed = numFirst(r.listedPointPrice, r.pointPrice);
+  if (Number.isFinite(effective)) {
+    const parts = [`${money(effective)}/point effective`];
+    if (Number.isFinite(listed) && Math.abs(listed - effective) >= 0.01) {
+      parts.push(`${money(listed)}/point site rate`);
+    }
+    return parts;
+  }
+  return Number.isFinite(listed) ? [`${money(listed)}/point`] : [];
+}
+
 function make(r) {
   r.resort = clean(r.resort);
   r.room = clean(r.room);
+  if (!Number.isFinite(r.nightly)) r.nightly = div(r.total, r.nights);
+  if (!Number.isFinite(r.effectivePointPrice)) r.effectivePointPrice = div(r.total, r.points);
+  if (!Number.isFinite(r.listedPointPrice) && Number.isFinite(r.pointPrice)) r.listedPointPrice = r.pointPrice;
+  if (!Number.isFinite(r.pointPrice)) r.pointPrice = numFirst(r.effectivePointPrice, r.listedPointPrice);
   return r?.id && (r.resort || r.room || r.checkIn) ? r : null;
 }
 
