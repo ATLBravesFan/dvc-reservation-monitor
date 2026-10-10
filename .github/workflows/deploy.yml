@@ -2,6 +2,9 @@ name: Deploy DVC monitor
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/run-deploy.once"
 
 permissions:
   contents: read
