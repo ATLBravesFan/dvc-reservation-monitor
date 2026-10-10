@@ -27,7 +27,19 @@ if (config.name !== "dvc-reservation-monitor") throw new Error("Unexpected Worke
 // never exposes the account/database IDs in the repository. Wrangler resolves
 // relative paths from the config file location, so make repo paths absolute
 // before writing that temporary config.
-config.main = join(repoRoot, config.main);
+const workerMain = join(repoRoot, config.main);
+config.main = workerMain;
+
+// Pushover's e-mail gateway address is kept only in GitHub/Cloudflare secrets.
+// When configured, inject a BCC recipient into the Worker source in this
+// ephemeral Actions checkout before deployment. The address is never committed.
+if (process.env.PUSHOVER_EMAIL?.trim()) {
+  const original = readFileSync(workerMain, "utf8");
+  const needle = "      to: [{ email: env.EMAIL_TO }],";
+  const replacement = `${needle}\n      ...(env.PUSHOVER_EMAIL ? { bcc: [{ email: env.PUSHOVER_EMAIL }] } : {}),`;
+  if (!original.includes(needle)) throw new Error("Could not locate Brevo recipient block for Pushover injection");
+  writeFileSync(workerMain, original.replace(needle, replacement));
+}
 
 const apiRoot = `https://api.cloudflare.com/client/v4/accounts/${account}`;
 async function api(path, options = {}) {
@@ -81,14 +93,16 @@ const tempDir = mkdtempSync(join(tmpdir(), "dvc-deploy-"));
 const tempConfig = join(tempDir, "wrangler.deploy.json");
 const secretsPath = join(tempDir, "secrets.json");
 writeFileSync(tempConfig, JSON.stringify(config, null, 2));
-writeFileSync(secretsPath, JSON.stringify({
+const workerSecrets = {
   BREVO_API_KEY: process.env.BREVO_API_KEY,
   EMAIL_TO: process.env.EMAIL_TO,
   EMAIL_FROM: process.env.EMAIL_FROM,
   INGEST_TOKEN: process.env.DVC_MONITOR_INGEST_TOKEN,
   ADMIN_TOKEN: process.env.DVC_MONITOR_ADMIN_TOKEN,
   GITHUB_DISPATCH_TOKEN: process.env.DVC_GITHUB_DISPATCH_TOKEN,
-}), { mode: 0o600 });
+};
+if (process.env.PUSHOVER_EMAIL?.trim()) workerSecrets.PUSHOVER_EMAIL = process.env.PUSHOVER_EMAIL.trim();
+writeFileSync(secretsPath, JSON.stringify(workerSecrets), { mode: 0o600 });
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -112,6 +126,7 @@ try {
   const url = combined.match(/https:\/\/[A-Za-z0-9.-]+\.workers\.dev\/?/)?.[0] || null;
   console.log(`D1 database UUID: ${database.uuid}`);
   if (url) console.log(`DVC_MONITOR_BASE_URL=${url}`);
+  console.log(`Pushover e-mail gateway: ${process.env.PUSHOVER_EMAIL?.trim() ? "enabled" : "not configured"}`);
   console.log("Deployment complete. Keep ChangeDetection enabled until the 48-hour parallel verification is complete.");
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
