@@ -45,6 +45,7 @@ export const WATCHES = {
     interval: "5 minutes",
     priceChanges: true,
     match: r => (Number.isFinite(r.nightly) && r.nightly < 300) ||
+      (Number.isFinite(r.pointPrice) && r.pointPrice < 12) ||
       (/(?:one|two|three|1|2|3)[ -]?bedroom/i.test(r.room || "") && Number.isFinite(r.pointPrice) && r.pointPrice < 17),
   },
   dvcRental: {
