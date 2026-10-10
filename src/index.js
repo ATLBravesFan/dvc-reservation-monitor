@@ -367,6 +367,21 @@ function alertKey(source, listing) {
   return `alert:${source}:${listing.id}:${fingerprint(listing)}`;
 }
 
+function priorityRentalStoreSubject(events, subjectBits) {
+  const matches = new Set(events.flatMap(event => event.matches || []));
+  const nightly = matches.has(WATCHES.rentalStoreNightly.title);
+  const points = matches.has(WATCHES.rentalStorePoints.title);
+  if (!nightly && !points) return null;
+
+  const onlyPriceChanges = events.every(event => event.type === "PRICE CHANGE");
+  const statusPrefix = onlyPriceChanges ? "PRICE CHANGE — " : "";
+  const suffix = onlyPriceChanges || !subjectBits.length ? "" : ` — ${subjectBits.join(", ")}`;
+
+  if (nightly && points) return `🔥🔥 ${statusPrefix}DVC RENTAL UNDER $201 + $12/PT 🔥🔥${suffix}`;
+  if (nightly) return `🔥 ${statusPrefix}DVC RENTAL UNDER $201 🔥${suffix}`;
+  return `🔥 ${statusPrefix}DVC RENTAL UNDER $12/PT 🔥${suffix}`;
+}
+
 async function sendEmail(env, title, events, showMatches) {
   const newCount = events.filter(event => event.type === "NEW").length;
   const changedCount = events.length - newCount;
@@ -374,6 +389,7 @@ async function sendEmail(env, title, events, showMatches) {
     newCount ? `${newCount} new` : null,
     changedCount ? `${changedCount} price change${changedCount === 1 ? "" : "s"}` : null,
   ].filter(Boolean);
+  const subject = priorityRentalStoreSubject(events, subjectBits) || `${title} — ${subjectBits.join(", ")}`;
 
   const blocks = events.map(event => {
     const listing = event.listing;
@@ -386,7 +402,7 @@ async function sendEmail(env, title, events, showMatches) {
     </div>`;
   }).join("");
 
-  await sendBrevo(env, `${title} — ${subjectBits.join(", ")}`, `<h2>${escapeHtml(title)}</h2>${blocks}`);
+  await sendBrevo(env, subject, `<h2>${escapeHtml(title)}</h2>${blocks}`);
 }
 
 async function sendSystemEmail(env, store, subject, text) {
