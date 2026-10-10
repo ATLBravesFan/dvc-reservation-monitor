@@ -42,7 +42,7 @@ For the **Deploy DVC monitor** workflow:
 - `EMAIL_FROM`
 - `DVC_MONITOR_INGEST_TOKEN`
 - `DVC_MONITOR_ADMIN_TOKEN`
-- `GITHUB_DISPATCH_TOKEN`
+- `DVC_GITHUB_DISPATCH_TOKEN`
 
 After deployment, add:
 
