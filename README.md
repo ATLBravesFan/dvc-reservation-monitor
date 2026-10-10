@@ -6,13 +6,15 @@ Free-tier DVC confirmed-reservation monitoring built with Cloudflare Workers + D
 
 | Watch | Schedule | Alerts |
 |---|---:|---|
-| DVC Rental Store under $200 | every minute | new + price changes; current legacy cutoff is `< $201/night` |
-| DVC Rental Store under $12/point | every minute | new + price changes |
+| DVC Rental Store under $201 | every minute | new + price changes below `$201/night` |
+| DVC Rental Store under $12/point | every minute | new + price changes below `$12/point` |
 | DVC Rental Store website backup | requested every minute; 5-minute GitHub cron fallback | new + price changes matching either fast Rental Store filter |
 | DVC Rental Store - All Reservations | every 10 minutes | all new reservations + price changes |
-| David's Vacation Rentals | every 10 minutes | `< $300/night` OR 1/2/3-bedroom `< $17/point`; new + price changes |
+| David's Vacation Rentals | every 5 minutes | `< $300/night` OR 1/2/3-bedroom `< $17/point`; new + price changes |
 | DVC-Rental | every 10 minutes | all newly listed confirmed reservations across all pages |
 | DVC Shop | every 10 minutes | newly available confirmed reservations |
+
+Any monitored source that exposes enough price data is also checked for the priority bargain thresholds `< $201/night` and `< $12/point`. A matching event gets a flame subject so it stands out in Gmail and Pushover. The nightly threshold can be evaluated for every current source. Point-price matching requires the source to expose point count or point price; Rental Store and David's currently do so, while the current DVC-Rental and DVC Shop listing feeds do not reliably expose point pricing.
 
 The first successful snapshot for each source is a baseline and sends no mass alert. Removals do not alert. Direct booking links are included whenever available.
 
@@ -25,7 +27,7 @@ The first successful snapshot for each source is a baseline and sends no mass al
 - Snapshots advance only after alerts are successfully delivered or there is nothing new to deliver.
 - Three consecutive source failures trigger a warning email.
 - The status page shows source last-check/last-success timestamps, failure counts, and email usage.
-- Brevo capacity guardrails warn at 225 sends/day, pause low-priority emails at 250, and preserve bargain-alert capacity until a hard safety cutoff of 295.
+- With Gmail plus the Pushover email gateway, each alert consumes two Brevo recipient deliveries. The monitor warns at 110 alert emails/day, pauses low-priority emails at 125, and preserves bargain-alert capacity until a hard safety cutoff of 145 alert emails/day, keeping the theoretical maximum below 300 recipient deliveries/day.
 
 ## Storage
 
@@ -40,6 +42,7 @@ For the **Deploy DVC monitor** workflow:
 - `BREVO_API_KEY`
 - `EMAIL_TO`
 - `EMAIL_FROM`
+- `PUSHOVER_EMAIL` (optional; Pushover email gateway)
 - `DVC_MONITOR_INGEST_TOKEN`
 - `DVC_MONITOR_ADMIN_TOKEN`
 - `DVC_GITHUB_DISPATCH_TOKEN`
