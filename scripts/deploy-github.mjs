@@ -31,14 +31,16 @@ const workerMain = join(repoRoot, config.main);
 config.main = workerMain;
 
 // Pushover's e-mail gateway address is kept only in GitHub/Cloudflare secrets.
-// When configured, inject a BCC recipient into the Worker source in this
-// ephemeral Actions checkout before deployment. The address is never committed.
+// The wrapper Worker imports src/index.js, where the standard monitor sends
+// Brevo mail, so inject the BCC into that notification module rather than the
+// top-level wrapper entrypoint. The address is never committed.
 if (process.env.PUSHOVER_EMAIL?.trim()) {
-  const original = readFileSync(workerMain, "utf8");
+  const notificationModule = join(repoRoot, "src", "index.js");
+  const original = readFileSync(notificationModule, "utf8");
   const needle = "      to: [{ email: env.EMAIL_TO }],";
   const replacement = `${needle}\n      ...(env.PUSHOVER_EMAIL ? { bcc: [{ email: env.PUSHOVER_EMAIL }] } : {}),`;
   if (!original.includes(needle)) throw new Error("Could not locate Brevo recipient block for Pushover injection");
-  writeFileSync(workerMain, original.replace(needle, replacement));
+  writeFileSync(notificationModule, original.replace(needle, replacement));
 }
 
 const apiRoot = `https://api.cloudflare.com/client/v4/accounts/${account}`;
