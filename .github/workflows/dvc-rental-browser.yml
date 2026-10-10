@@ -1,0 +1,32 @@
+name: DVC-Rental browser watch
+
+on:
+  schedule:
+    - cron: "3,13,23,33,43,53 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dvc-rental-browser-watch
+  cancel-in-progress: true
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install browser dependency
+        run: npm install --omit=dev --no-audit --no-fund
+      - name: Scrape DVC-Rental
+        env:
+          DVC_MONITOR_BASE_URL: ${{ secrets.DVC_MONITOR_BASE_URL }}
+          DVC_MONITOR_INGEST_TOKEN: ${{ secrets.DVC_MONITOR_INGEST_TOKEN }}
+          DVC_BROWSER_JOB: dvc-rental
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node scripts/browser-backups.mjs
