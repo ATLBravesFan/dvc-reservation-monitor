@@ -19,8 +19,15 @@ if (missing.length) throw new Error("Missing GitHub Actions secrets: " + missing
 const account = process.env.CLOUDFLARE_ACCOUNT_ID.trim();
 if (!/^[a-f0-9]{32}$/i.test(account)) throw new Error("Invalid CLOUDFLARE_ACCOUNT_ID");
 
+const repoRoot = process.cwd();
 const config = JSON.parse(readFileSync("wrangler.jsonc", "utf8"));
 if (config.name !== "dvc-reservation-monitor") throw new Error("Unexpected Worker name");
+
+// The generated Wrangler config is written into a temporary directory so it
+// never exposes the account/database IDs in the repository. Wrangler resolves
+// relative paths from the config file location, so make repo paths absolute
+// before writing that temporary config.
+config.main = join(repoRoot, config.main);
 
 const apiRoot = `https://api.cloudflare.com/client/v4/accounts/${account}`;
 async function api(path, options = {}) {
@@ -65,7 +72,7 @@ config.d1_databases = [{
   binding: "DB",
   database_name: databaseName,
   database_id: database.uuid,
-  migrations_dir: "migrations",
+  migrations_dir: join(repoRoot, "migrations"),
 }];
 config.account_id = account;
 config.workers_dev = true;
@@ -85,7 +92,7 @@ writeFileSync(secretsPath, JSON.stringify({
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
-    cwd: process.cwd(),
+    cwd: repoRoot,
     env: process.env,
     encoding: "utf8",
     ...options,
