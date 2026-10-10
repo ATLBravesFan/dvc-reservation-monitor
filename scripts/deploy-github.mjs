@@ -30,14 +30,14 @@ if (config.name !== "dvc-reservation-monitor") throw new Error("Unexpected Worke
 const workerMain = join(repoRoot, config.main);
 config.main = workerMain;
 
-// Optional delivery addresses are kept only in GitHub/Cloudflare secrets.
-// When configured, inject them into the Worker source in this ephemeral
-// Actions checkout before deployment. The addresses are never committed.
-if (process.env.PUSHOVER_EMAIL?.trim() || process.env.DVC_NOTIFY_EMAIL?.trim()) {
+// Pushover's e-mail gateway address is kept only in GitHub/Cloudflare secrets.
+// When configured, inject a BCC recipient into the Worker source in this
+// ephemeral Actions checkout before deployment. The address is never committed.
+if (process.env.PUSHOVER_EMAIL?.trim()) {
   const original = readFileSync(workerMain, "utf8");
   const needle = "      to: [{ email: env.EMAIL_TO }],";
-  const replacement = `      to: [{ email: env.EMAIL_TO }, ...(env.DVC_NOTIFY_EMAIL ? [{ email: env.DVC_NOTIFY_EMAIL }] : [])],\n      ...(env.PUSHOVER_EMAIL ? { bcc: [{ email: env.PUSHOVER_EMAIL }] } : {}),`;
-  if (!original.includes(needle)) throw new Error("Could not locate Brevo recipient block for optional-recipient injection");
+  const replacement = `${needle}\n      ...(env.PUSHOVER_EMAIL ? { bcc: [{ email: env.PUSHOVER_EMAIL }] } : {}),`;
+  if (!original.includes(needle)) throw new Error("Could not locate Brevo recipient block for Pushover injection");
   writeFileSync(workerMain, original.replace(needle, replacement));
 }
 
@@ -102,7 +102,6 @@ const workerSecrets = {
   GITHUB_DISPATCH_TOKEN: process.env.DVC_GITHUB_DISPATCH_TOKEN,
 };
 if (process.env.PUSHOVER_EMAIL?.trim()) workerSecrets.PUSHOVER_EMAIL = process.env.PUSHOVER_EMAIL.trim();
-if (process.env.DVC_NOTIFY_EMAIL?.trim()) workerSecrets.DVC_NOTIFY_EMAIL = process.env.DVC_NOTIFY_EMAIL.trim();
 writeFileSync(secretsPath, JSON.stringify(workerSecrets), { mode: 0o600 });
 
 function run(command, args, options = {}) {
@@ -128,7 +127,6 @@ try {
   console.log(`D1 database UUID: ${database.uuid}`);
   if (url) console.log(`DVC_MONITOR_BASE_URL=${url}`);
   console.log(`Pushover e-mail gateway: ${process.env.PUSHOVER_EMAIL?.trim() ? "enabled" : "not configured"}`);
-  console.log(`Dedicated Gmail alert recipient: ${process.env.DVC_NOTIFY_EMAIL?.trim() ? "enabled" : "not configured"}`);
   console.log("Deployment complete. Keep ChangeDetection enabled until the 48-hour parallel verification is complete.");
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
