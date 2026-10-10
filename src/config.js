@@ -58,7 +58,7 @@ export const WATCHES = {
     priceChanges: true,
     match: r => {
       const pointRate = effectivePointRate(r);
-      return (Number.isFinite(r.nightly) && r.nightly < 300) ||
+      return (Number.isFinite(r.nightly) && r.nightly < 376) ||
         (Number.isFinite(pointRate) && pointRate < 12) ||
         (/(?:one|two|three|1|2|3)[ -]?bedroom/i.test(r.room || "") && Number.isFinite(pointRate) && pointRate < 17);
     },
