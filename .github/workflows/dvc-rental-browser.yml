@@ -1,8 +1,10 @@
 name: DVC-Rental browser watch
 
 on:
+  # Primary 10-minute cadence is dispatched by the Cloudflare Worker.
+  # This lower-frequency cron remains only as a fallback if dispatching fails.
   schedule:
-    - cron: "3,13,23,33,43,53 * * * *"
+    - cron: "7,37 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -10,7 +12,7 @@ permissions:
 
 concurrency:
   group: dvc-rental-browser-watch
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   scrape:
