@@ -23,10 +23,9 @@ jobs:
           node-version: "22"
       - name: Install browser dependency
         run: npm install --omit=dev --no-audit --no-fund
-      - name: Scrape DVC-Rental
+      - name: Scrape DVC-Rental with point details
         env:
           DVC_MONITOR_BASE_URL: ${{ secrets.DVC_MONITOR_BASE_URL }}
           DVC_MONITOR_INGEST_TOKEN: ${{ secrets.DVC_MONITOR_INGEST_TOKEN }}
-          DVC_BROWSER_JOB: dvc-rental
           CHROME_PATH: /usr/bin/google-chrome
-        run: node scripts/browser-backups.mjs
+        run: node scripts/dvc-rental-browser.mjs
