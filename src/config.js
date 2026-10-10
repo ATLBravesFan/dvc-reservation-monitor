@@ -26,6 +26,8 @@ export const URLS = {
   davids: "https://dvcrequest.com/dvc-guests/confirmed-reservations-for-rent/",
   dvcRental: "https://dvc-rental.com/deals/",
   dvcShop: "https://rentals.dvcshop.com/confirmed-reservations/",
+  rareFinds: "https://dvcreservations.com/rarefinds.php",
+  rareFindsList: "https://dvcreservations.com/rarefindslist.php",
 };
 
 export const WATCHES = {
@@ -73,6 +75,12 @@ export const WATCHES = {
     priceChanges: false,
     match: r => !r.status || /available/i.test(r.status),
   },
+  rareFinds: {
+    title: "DVCReservations Rare Finds",
+    interval: "15 minutes",
+    priceChanges: true,
+    match: () => true,
+  },
 };
 
 // With Pushover e-mail gateway enabled, each alert is delivered to two
@@ -93,4 +101,5 @@ export const SOURCE_EXPECTED_MINUTES = {
   "davids": 8,
   "dvc-shop": 15,
   "dvc-rental": 20,
+  "dvcreservations-rare-finds": 20,
 };
