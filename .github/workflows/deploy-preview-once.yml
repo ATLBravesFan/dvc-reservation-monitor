@@ -1,0 +1,124 @@
+name: Deploy and preview DVC alerts
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/run-deploy-preview.once"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-dvc-monitor
+  cancel-in-progress: false
+
+jobs:
+  deploy-and-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Validate monitor
+        run: npm run check
+
+      - name: Deploy latest Worker
+        run: node scripts/deploy-github.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          PUSHOVER_EMAIL: ${{ secrets.PUSHOVER_EMAIL }}
+          DVC_MONITOR_INGEST_TOKEN: ${{ secrets.DVC_MONITOR_INGEST_TOKEN }}
+          DVC_MONITOR_ADMIN_TOKEN: ${{ secrets.DVC_MONITOR_ADMIN_TOKEN }}
+          DVC_GITHUB_DISPATCH_TOKEN: ${{ secrets.DVC_GITHUB_DISPATCH_TOKEN }}
+
+      - name: Send realistic four-site alert preview
+        env:
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          PUSHOVER_EMAIL: ${{ secrets.PUSHOVER_EMAIL }}
+        run: |
+          node --input-type=module <<'NODE'
+          const required = ["BREVO_API_KEY", "EMAIL_TO", "EMAIL_FROM"];
+          for (const key of required) if (!process.env[key]) throw new Error(`${key} is required`);
+
+          const cards = [
+            {
+              source: "DVC Rental Store",
+              flag: "Standard new-reservation example",
+              line: "234831 | Grand Floridian Resort & Spa | Resort Studio · Resort View | 2026-12-23 → 2026-12-25 | 2 nights | $800/night | $1,600 total",
+              note: "Rental Store API alerts will also show points and calculated $/point whenever the API supplies the point total.",
+              url: "https://dvcrentalstore.com/guests/reservations/a0fVJ000003w6uXYAQ/",
+            },
+            {
+              source: "David's Vacation Club Rentals",
+              flag: "Calculated nightly + point pricing",
+              line: "10053244 | Old Key West | Two Bedroom | 2026-10-26 → 2026-10-30 | 4 nights | $702/night | 156 points | $18/point effective | $2,808 total",
+              note: "David's publishes both points and $/point, and the monitor also calculates total ÷ nights and total ÷ points.",
+              url: "https://dvcrequest.com/dvc-guests/confirmed-reservations-for-rent/10053244",
+            },
+            {
+              source: "DVC-Rental",
+              flag: "🔥 WOULD TRIGGER UNDER $201/NIGHT 🔥",
+              line: "DVC9759 | Hilton Head Island Resort | Deluxe Studio · Standard View | 2027-01-26 → 2027-01-27 | 1 night | $168/night | 6 points | $28/point effective | $27/point site rate | $168 total",
+              note: "The new browser check opens reservation details to capture points and the site's $/pt, then calculates the effective all-in $/pt from total ÷ points.",
+              url: "https://dvc-rental.com/deals/DVC9759",
+            },
+            {
+              source: "DVC Shop",
+              flag: "Calculated nightly price",
+              line: "584401 | Saratoga Springs | Deluxe Studio | 2026-11-01 → 2026-11-02 | 1 night | $322/night | $322 listed total",
+              note: "DVC Shop's confirmed-reservation table does not expose DVC point totals, so $/point is omitted rather than guessed. The booking page separately shows its processing fee.",
+              url: "https://rentals.dvcshop.com/product/confirmed-reservation/?post_id=584401",
+            },
+          ];
+
+          const html = `
+            <html><body style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Arial,sans-serif;padding:18px;color:#111">
+              <h2 style="margin:0 0 8px">DVC Monitor — Realistic Alert Preview</h2>
+              <p style="margin:0 0 18px;color:#555">TEST ONLY — these are existing-site examples used to show the information and booking links your real alerts will contain.</p>
+              ${cards.map(card => `
+                <div style="border:1px solid #ddd;border-radius:10px;padding:14px;margin:0 0 14px">
+                  <div style="font-size:18px;font-weight:700">${card.source}</div>
+                  <div style="font-weight:600;margin:5px 0">${card.flag}</div>
+                  <div style="line-height:1.55">${card.line}</div>
+                  <div style="font-size:13px;color:#555;margin-top:6px">${card.note}</div>
+                  <div style="margin-top:9px"><a href="${card.url}">Book / open this reservation</a></div>
+                  <div style="font-size:11px;color:#777;word-break:break-all;margin-top:3px">${card.url}</div>
+                </div>`).join("")}
+              <p style="font-size:13px;color:#555">Real bargain alerts use the flame subject lines, including 🔥 DVC RENTAL UNDER $201 🔥 and 🔥 DVC RENTAL UNDER $12/PT 🔥.</p>
+            </body></html>`;
+
+          const payload = {
+            sender: { email: process.env.EMAIL_FROM, name: "DVC Monitor" },
+            to: [{ email: process.env.EMAIL_TO }],
+            ...(process.env.PUSHOVER_EMAIL ? { bcc: [{ email: process.env.PUSHOVER_EMAIL }] } : {}),
+            subject: "🔥 TEST — DVC ALERT PREVIEW (ALL 4 SITES) 🔥",
+            htmlContent: html,
+            tags: ["dvc-monitor", "preview"],
+          };
+
+          const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              "api-key": process.env.BREVO_API_KEY,
+            },
+            body: JSON.stringify(payload),
+          });
+          const body = await response.text();
+          if (!response.ok) throw new Error(`Brevo ${response.status}: ${body.slice(0, 500)}`);
+          console.log(`Preview sent: ${body}`);
+          NODE
