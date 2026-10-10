@@ -1,5 +1,12 @@
 const KEYHOLDER_BASE = "https://api.keyholdervacations.com/v2/dvc/rental/confirmed-reservations";
 
+function effectivePointRate(r) {
+  if (Number.isFinite(r?.effectivePointPrice)) return r.effectivePointPrice;
+  if (Number.isFinite(r?.pointPrice)) return r.pointPrice;
+  if (Number.isFinite(r?.total) && Number.isFinite(r?.points) && r.points) return r.total / r.points;
+  return null;
+}
+
 export const URLS = {
   get rentalStoreApi() {
     const start = new Date();
@@ -32,7 +39,10 @@ export const WATCHES = {
     title: "DVC Rental Store under $12 per point",
     interval: "1 minute",
     priceChanges: true,
-    match: r => Number.isFinite(r.pointPrice) && r.pointPrice < 12,
+    match: r => {
+      const rate = effectivePointRate(r);
+      return Number.isFinite(rate) && rate < 12;
+    },
   },
   rentalStoreAll: {
     title: "DVC Rental Store - All Reservations",
@@ -44,9 +54,12 @@ export const WATCHES = {
     title: "David's Vacation Rentals",
     interval: "5 minutes",
     priceChanges: true,
-    match: r => (Number.isFinite(r.nightly) && r.nightly < 300) ||
-      (Number.isFinite(r.pointPrice) && r.pointPrice < 12) ||
-      (/(?:one|two|three|1|2|3)[ -]?bedroom/i.test(r.room || "") && Number.isFinite(r.pointPrice) && r.pointPrice < 17),
+    match: r => {
+      const pointRate = effectivePointRate(r);
+      return (Number.isFinite(r.nightly) && r.nightly < 300) ||
+        (Number.isFinite(pointRate) && pointRate < 12) ||
+        (/(?:one|two|three|1|2|3)[ -]?bedroom/i.test(r.room || "") && Number.isFinite(pointRate) && pointRate < 17);
+    },
   },
   dvcRental: {
     title: "DVC-Rental New Confirmed Reservations",
