@@ -35,6 +35,18 @@ assert.equal(keyholder[0].bookingUrl.endsWith("/a0fTEST123/"), true);
 assert.ok(formatListing(keyholder[0]).includes("80 points"));
 assert.ok(formatListing(keyholder[0]).includes("$10/point effective"));
 
+// Older D1 snapshots did not contain the newer derived point-price fields.
+// Adding parser fields must not make an unchanged reservation look changed.
+const legacyKeyholder = { ...keyholder[0] };
+delete legacyKeyholder.effectivePointPrice;
+delete legacyKeyholder.listedPointPrice;
+assert.equal(fingerprint(legacyKeyholder), fingerprint(keyholder[0]));
+
+// Real user-visible changes must still change the fingerprint.
+assert.notEqual(fingerprint({ ...keyholder[0], total: 760, nightly: 190 }), fingerprint(keyholder[0]));
+assert.notEqual(fingerprint({ ...keyholder[0], checkOut: "2027-01-06", nights: 5 }), fingerprint(keyholder[0]));
+assert.notEqual(fingerprint({ ...keyholder[0], room: "One Bedroom" }), fingerprint(keyholder[0]));
+
 const davids = parseDavids(`
 <a href="/dvc-guests/confirmed-reservations-for-rent/10052397">Request Now</a>
 Oct 26, 2026 - Oct 29, 2026 3 nights
