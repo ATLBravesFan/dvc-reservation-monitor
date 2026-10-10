@@ -23,10 +23,9 @@ export const URLS = {
 
 export const WATCHES = {
   rentalStoreNightly: {
-    title: "DVC Rental Store under $200",
+    title: "DVC Rental Store under $201",
     interval: "1 minute",
     priceChanges: true,
-    // Mirrors the prior ChangeDetection filter: anything below $201/night.
     match: r => Number.isFinite(r.nightly) && r.nightly < 201,
   },
   rentalStorePoints: {
@@ -43,7 +42,7 @@ export const WATCHES = {
   },
   davids: {
     title: "David's Vacation Rentals",
-    interval: "10 minutes",
+    interval: "5 minutes",
     priceChanges: true,
     match: r => (Number.isFinite(r.nightly) && r.nightly < 300) ||
       (/(?:one|two|three|1|2|3)[ -]?bedroom/i.test(r.room || "") && Number.isFinite(r.pointPrice) && r.pointPrice < 17),
@@ -63,8 +62,8 @@ export const WATCHES = {
 };
 
 // With Pushover e-mail gateway enabled, each alert is delivered to two
-// recipients (primary Gmail + Pushover). These conservative message limits
-// keep total Brevo recipient deliveries below the 300/day free allowance.
+// recipients (notification Gmail + Pushover). These conservative message
+// limits keep total Brevo recipient deliveries below the 300/day free allowance.
 export const EMAIL_LIMITS = {
   providerDaily: 150,
   warningAt: 110,
@@ -77,7 +76,7 @@ export const SOURCE_EXPECTED_MINUTES = {
   "rental-store-all": 12,
   "rental-store-website": 4,
   "rental-store-website-dispatch": 3,
-  "davids": 15,
+  "davids": 8,
   "dvc-shop": 15,
   "dvc-rental": 20,
 };
