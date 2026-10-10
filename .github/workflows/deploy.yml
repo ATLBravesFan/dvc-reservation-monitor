@@ -31,6 +31,7 @@ jobs:
           BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          PUSHOVER_EMAIL: ${{ secrets.PUSHOVER_EMAIL }}
           DVC_MONITOR_INGEST_TOKEN: ${{ secrets.DVC_MONITOR_INGEST_TOKEN }}
           DVC_MONITOR_ADMIN_TOKEN: ${{ secrets.DVC_MONITOR_ADMIN_TOKEN }}
           DVC_GITHUB_DISPATCH_TOKEN: ${{ secrets.DVC_GITHUB_DISPATCH_TOKEN }}
