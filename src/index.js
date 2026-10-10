@@ -53,7 +53,9 @@ export default {
 async function runScheduled(env, now) {
   const store = new Storage(env.DB);
   const result = {};
-  const tenMinuteCycle = now.getUTCMinutes() % 10 === 0;
+  const minute = now.getUTCMinutes();
+  const fiveMinuteCycle = minute % 5 === 0;
+  const tenMinuteCycle = minute % 10 === 0;
 
   try {
     result.rentalStore = await tracked(env, store, "rental-store-api", () => pollRentalStore(env, store, tenMinuteCycle));
@@ -72,11 +74,15 @@ async function runScheduled(env, now) {
     result.rentalStoreWebsiteDispatch = { ok: false, error: errorMessage(error) };
   }
 
-  if (tenMinuteCycle) {
-    result.slower = await pollSlowerHttpSources(env, store);
+  if (fiveMinuteCycle) {
+    result.davids = await pollDavids(env, store);
   }
 
-  if (now.getUTCMinutes() === 7) {
+  if (tenMinuteCycle) {
+    result.dvcShop = await pollDvcShop(env, store);
+  }
+
+  if (minute === 7) {
     try { await store.cleanupExpiredAlerts(); } catch { /* non-critical cleanup */ }
   }
 
@@ -196,7 +202,7 @@ async function processRentalStoreFast(env, store, rows) {
 
   const events = [];
   for (const listing of rows) {
-    const matches = rentalStoreMatches(listing);
+    const matches = bargainMatches(listing);
     if (!matches.length) continue;
     const old = previous[listing.id];
     if (!old) events.push({ type: "NEW", listing, matches });
@@ -220,19 +226,20 @@ async function processRentalStoreAllWatch(env, store, rows) {
 
   const events = [];
   for (const listing of rows) {
+    const matches = bargainMatches(listing);
     const old = previous[listing.id];
-    if (!old) events.push({ type: "NEW", listing });
+    if (!old) events.push({ type: "NEW", listing, matches });
     else if (WATCHES.rentalStoreAll.priceChanges && fingerprint(old) !== fingerprint(listing)) {
-      events.push({ type: "PRICE CHANGE", listing, previous: old });
+      events.push({ type: "PRICE CHANGE", listing, previous: old, matches });
     }
   }
 
-  const delivery = await sendEvents(env, store, "dvc-rental-store", WATCHES.rentalStoreAll.title, events, false);
+  const delivery = await sendEvents(env, store, "dvc-rental-store", WATCHES.rentalStoreAll.title, events, true);
   if (!delivery.deferred) await putSnapshotIfChanged(store, key, previous, current);
   return { ok: true, count: rows.length, baseline: false, alerts: delivery.sent, deferred: delivery.deferred };
 }
 
-function rentalStoreMatches(listing) {
+function bargainMatches(listing) {
   const matches = [];
   if (WATCHES.rentalStoreNightly.match(listing)) matches.push(WATCHES.rentalStoreNightly.title);
   if (WATCHES.rentalStorePoints.match(listing)) matches.push(WATCHES.rentalStorePoints.title);
@@ -243,7 +250,7 @@ async function processRentalStoreWebsite(env, store, rows) {
   const key = "rental-store-website";
   const previous = await store.getSnapshot(key);
   const current = byId(rows);
-  const qualifying = rows.filter(r => rentalStoreMatches(r).length > 0);
+  const qualifying = rows.filter(r => bargainMatches(r).length > 0);
 
   if (!previous) {
     await store.putSnapshot(key, current);
@@ -259,7 +266,7 @@ async function processRentalStoreWebsite(env, store, rows) {
 
   const events = [];
   for (const listing of qualifying) {
-    const matches = rentalStoreMatches(listing);
+    const matches = bargainMatches(listing);
     const old = previous[listing.id];
     if (!old) events.push({ type: "NEW", listing, matches });
     else if (fingerprint(old) !== fingerprint(listing)) events.push({ type: "PRICE CHANGE", listing, previous: old, matches });
@@ -279,30 +286,35 @@ async function processRentalStoreWebsite(env, store, rows) {
   };
 }
 
-async function pollSlowerHttpSources(env, store) {
-  const result = {};
-
+async function pollDavids(env, store) {
   try {
-    result.davids = await tracked(env, store, "davids", async () => {
+    return await tracked(env, store, "davids", async () => {
       const rows = parseDavids(await fetchText(URLS.davids));
       if (!rows.length) throw new Error("David's parser returned zero reservations");
       return processStandardWatch(env, store, "davids", WATCHES.davids, rows);
     });
   } catch (error) {
-    result.davids = { ok: false, error: errorMessage(error) };
+    return { ok: false, error: errorMessage(error) };
   }
+}
 
+async function pollDvcShop(env, store) {
   try {
-    result.dvcShop = await tracked(env, store, "dvc-shop", async () => {
+    return await tracked(env, store, "dvc-shop", async () => {
       const rows = parseDvcShop(await fetchText(URLS.dvcShop));
       if (!rows.length) throw new Error("DVC Shop parser returned zero reservations");
       return processStandardWatch(env, store, "dvc-shop", WATCHES.dvcShop, rows);
     });
   } catch (error) {
-    result.dvcShop = { ok: false, error: errorMessage(error) };
+    return { ok: false, error: errorMessage(error) };
   }
+}
 
-  return result;
+async function pollSlowerHttpSources(env, store) {
+  return {
+    davids: await pollDavids(env, store),
+    dvcShop: await pollDvcShop(env, store),
+  };
 }
 
 async function processStandardWatch(env, store, key, watch, rows) {
@@ -317,14 +329,22 @@ async function processStandardWatch(env, store, key, watch, rows) {
   const events = [];
   for (const listing of rows) {
     if (!watch.match(listing)) continue;
+    const matches = bargainMatches(listing);
     const old = previous[listing.id];
-    if (!old) events.push({ type: "NEW", listing });
-    else if (watch.priceChanges && fingerprint(old) !== fingerprint(listing)) {
-      events.push({ type: "PRICE CHANGE", listing, previous: old });
+    if (!old) {
+      events.push({ type: "NEW", listing, matches });
+      continue;
+    }
+
+    if (fingerprint(old) === fingerprint(listing)) continue;
+    const oldMatches = bargainMatches(old);
+    const gainedBargain = matches.some(match => !oldMatches.includes(match));
+    if (watch.priceChanges || gainedBargain) {
+      events.push({ type: "PRICE CHANGE", listing, previous: old, matches });
     }
   }
 
-  const delivery = await sendEvents(env, store, key, watch.title, events, false);
+  const delivery = await sendEvents(env, store, key, watch.title, events, true);
   if (!delivery.deferred) await putSnapshotIfChanged(store, key, previous, current);
   return { ok: true, count: rows.length, baseline: false, alerts: delivery.sent, deferred: delivery.deferred };
 }
@@ -332,8 +352,7 @@ async function processStandardWatch(env, store, key, watch, rows) {
 async function sendEvents(env, store, source, title, events, showMatches) {
   if (!events.length) return { sent: 0, deferred: false };
 
-  const priority = events.some(event => event.matches?.some(match =>
-    match === WATCHES.rentalStoreNightly.title || match === WATCHES.rentalStorePoints.title));
+  const priority = events.some(event => (event.matches || bargainMatches(event.listing)).length > 0);
   const count = await store.getEmailCount();
 
   if (count >= EMAIL_LIMITS.hardSafetyCutoff || (!priority && count >= EMAIL_LIMITS.lowPriorityCutoff)) {
@@ -367,19 +386,20 @@ function alertKey(source, listing) {
   return `alert:${source}:${listing.id}:${fingerprint(listing)}`;
 }
 
-function priorityRentalStoreSubject(events, subjectBits) {
-  const matches = new Set(events.flatMap(event => event.matches || []));
+function priorityBargainSubject(title, events, subjectBits) {
+  const matches = new Set(events.flatMap(event => event.matches || bargainMatches(event.listing)));
   const nightly = matches.has(WATCHES.rentalStoreNightly.title);
   const points = matches.has(WATCHES.rentalStorePoints.title);
   if (!nightly && !points) return null;
 
   const onlyPriceChanges = events.every(event => event.type === "PRICE CHANGE");
   const statusPrefix = onlyPriceChanges ? "PRICE CHANGE — " : "";
-  const suffix = onlyPriceChanges || !subjectBits.length ? "" : ` — ${subjectBits.join(", ")}`;
+  const sourceSuffix = title && title !== "DVC Rental Store" ? ` — ${title}` : "";
+  const countSuffix = onlyPriceChanges || !subjectBits.length ? "" : ` — ${subjectBits.join(", ")}`;
 
-  if (nightly && points) return `🔥🔥 ${statusPrefix}DVC RENTAL UNDER $201 + $12/PT 🔥🔥${suffix}`;
-  if (nightly) return `🔥 ${statusPrefix}DVC RENTAL UNDER $201 🔥${suffix}`;
-  return `🔥 ${statusPrefix}DVC RENTAL UNDER $12/PT 🔥${suffix}`;
+  if (nightly && points) return `🔥🔥 ${statusPrefix}DVC RENTAL UNDER $201 + $12/PT 🔥🔥${sourceSuffix}${countSuffix}`;
+  if (nightly) return `🔥 ${statusPrefix}DVC RENTAL UNDER $201 🔥${sourceSuffix}${countSuffix}`;
+  return `🔥 ${statusPrefix}DVC RENTAL UNDER $12/PT 🔥${sourceSuffix}${countSuffix}`;
 }
 
 async function sendEmail(env, title, events, showMatches) {
@@ -389,7 +409,7 @@ async function sendEmail(env, title, events, showMatches) {
     newCount ? `${newCount} new` : null,
     changedCount ? `${changedCount} price change${changedCount === 1 ? "" : "s"}` : null,
   ].filter(Boolean);
-  const subject = priorityRentalStoreSubject(events, subjectBits) || `${title} — ${subjectBits.join(", ")}`;
+  const subject = priorityBargainSubject(title, events, subjectBits) || `${title} — ${subjectBits.join(", ")}`;
 
   const blocks = events.map(event => {
     const listing = event.listing;
@@ -444,7 +464,7 @@ async function maybeSendEmailCapacityWarning(env, store, currentCount) {
     await sendBrevo(
       env,
       "DVC Monitor email-capacity warning",
-      `<p>The monitor has sent ${currentCount} emails today. Low-priority alerts pause at ${EMAIL_LIMITS.lowPriorityCutoff}; priority Rental Store bargain alerts remain enabled until the ${EMAIL_LIMITS.hardSafetyCutoff} safety cutoff.</p>`,
+      `<p>The monitor has sent ${currentCount} emails today. Low-priority alerts pause at ${EMAIL_LIMITS.lowPriorityCutoff}; bargain alerts remain enabled until the ${EMAIL_LIMITS.hardSafetyCutoff} safety cutoff.</p>`,
     );
     await store.incrementEmailCount();
     await store.putMeta(key, { sentAt: new Date().toISOString(), countBeforeWarning: currentCount });
