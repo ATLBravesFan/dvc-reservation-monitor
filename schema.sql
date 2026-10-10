@@ -1,25 +1,41 @@
-CREATE TABLE IF NOT EXISTS kv_state (
+CREATE TABLE IF NOT EXISTS snapshots (
+  source TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS alerts (
+  alert_key TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  listing_id TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  sent_at TEXT,
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_alerts_expires_at ON alerts(expires_at);
+CREATE INDEX IF NOT EXISTS idx_alerts_listing ON alerts(source, listing_id);
+
+CREATE TABLE IF NOT EXISTS counters (
+  day TEXT PRIMARY KEY,
+  emails_sent INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  expires_at INTEGER
+  updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_kv_state_expires_at ON kv_state(expires_at);
-
-CREATE TABLE IF NOT EXISTS source_health (
+CREATE TABLE IF NOT EXISTS health (
   source TEXT PRIMARY KEY,
-  last_attempt_at TEXT NOT NULL,
+  ok INTEGER NOT NULL DEFAULT 0,
+  last_checked_at TEXT NOT NULL,
   last_success_at TEXT,
-  last_failure_at TEXT,
   consecutive_failures INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
-  last_count INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS email_usage (
-  day TEXT PRIMARY KEY,
-  sent_count INTEGER NOT NULL DEFAULT 0,
-  warning_sent INTEGER NOT NULL DEFAULT 0,
-  updated_at TEXT NOT NULL
+  details TEXT
 );
