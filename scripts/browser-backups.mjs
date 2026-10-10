@@ -11,9 +11,16 @@ if (!new Set(["all", "rental-store", "dvc-rental"]).has(JOB)) throw new Error(`U
 const browser = await chromium.launch({
   headless: true,
   executablePath: CHROME,
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
 });
-const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+const context = await browser.newContext({
+  viewport: { width: 1440, height: 1000 },
+  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+  locale: "en-US",
+});
+await context.addInitScript(() => {
+  Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+});
 
 try {
   if (JOB === "all" || JOB === "rental-store") {
@@ -35,39 +42,64 @@ try {
 async function scrapeRentalStore(context) {
   const page = await context.newPage();
   const captured = [];
+  const jsonUrls = new Set();
 
   page.on("response", async response => {
     try {
       const contentType = response.headers()["content-type"] || "";
       if (!/json/i.test(contentType)) return;
+      jsonUrls.add(response.url());
       collectReservationObjects(await response.json(), captured);
     } catch {
       // Ignore responses whose body is no longer available.
     }
   });
 
-  await page.goto("https://dvcrentalstore.com/guests/browse-confirmed-reservations/", {
-    waitUntil: "domcontentloaded",
-    timeout: 60000,
-  });
-  await page.waitForTimeout(8000);
+  const urls = [
+    "https://dvcrentalstore.com/guests/reservations/",
+    "https://dvcrentalstore.com/guests/browse-confirmed-reservations/",
+  ];
 
-  const rendered = await page.locator('a[href*="/guests/reservations/"]').evaluateAll(anchors => anchors.map(anchor => {
-    const href = anchor.href;
-    let node = anchor;
-    let text = (anchor.innerText || "").trim();
-    for (let index = 0; index < 7 && node?.parentElement; index += 1) {
-      node = node.parentElement;
-      const candidate = (node.innerText || "").replace(/\s+/g, " ").trim();
-      if (candidate.length > text.length && candidate.length < 1800) text = candidate;
-      if (/\$[\d,]+/.test(candidate) && /\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{4}-\d{2}-\d{2}/.test(candidate)) break;
+  for (const url of urls) {
+    const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    console.log(`Rental Store page ${url}: HTTP ${response?.status() ?? "unknown"}, title=${JSON.stringify(await page.title())}`);
+    await page.waitForTimeout(5000);
+
+    // Trigger lazy-loaded inventory and allow client-side requests to finish.
+    for (let i = 0; i < 6; i += 1) {
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.waitForTimeout(1200);
     }
-    return { href, text };
-  }));
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(1500);
 
-  for (const row of rendered) {
-    const parsed = parseRenderedRentalStore(row);
-    if (parsed) captured.push(parsed);
+    const rendered = await page.locator('a[href*="/guests/reservations/"]').evaluateAll(anchors => anchors.map(anchor => {
+      const href = anchor.href;
+      let node = anchor;
+      let text = (anchor.innerText || "").trim();
+      for (let index = 0; index < 8 && node?.parentElement; index += 1) {
+        node = node.parentElement;
+        const candidate = (node.innerText || "").replace(/\s+/g, " ").trim();
+        if (candidate.length > text.length && candidate.length < 2200) text = candidate;
+        if (/\$[\d,]+/.test(candidate) && /\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{4}-\d{2}-\d{2}/.test(candidate)) break;
+      }
+      return { href, text };
+    }));
+
+    console.log(`Rental Store rendered reservation links on ${new URL(page.url()).pathname}: ${rendered.length}`);
+    for (const row of rendered) {
+      const parsed = parseRenderedRentalStore(row);
+      if (parsed) captured.push(parsed);
+    }
+
+    if (captured.length) break;
+  }
+
+  if (!captured.length) {
+    const body = clean((await page.locator("body").innerText().catch(() => ""))).slice(0, 1200);
+    console.log(`Rental Store diagnostic URL: ${page.url()}`);
+    console.log(`Rental Store JSON responses seen: ${jsonUrls.size}`);
+    console.log(`Rental Store body sample: ${JSON.stringify(body)}`);
   }
 
   await page.close();
@@ -75,20 +107,42 @@ async function scrapeRentalStore(context) {
 }
 
 function collectReservationObjects(value, out, depth = 0) {
-  if (depth > 9 || value == null) return;
+  if (depth > 10 || value == null) return;
   if (Array.isArray(value)) {
     for (const item of value) collectReservationObjects(item, out, depth + 1);
     return;
   }
   if (typeof value !== "object") return;
-  const id = first(value.reservationID, value.reservationId, value.reservation_id, value.id, value.Id, value.sfid);
-  if (id && /^a0f[a-z0-9]+$/i.test(String(id))) out.push(value);
+  const id = reservationIdFromObject(value);
+  if (id) out.push(value);
   for (const child of Object.values(value)) collectReservationObjects(child, out, depth + 1);
 }
 
+function reservationIdFromObject(row) {
+  const direct = first(
+    row.reservationID,
+    row.reservationId,
+    row.reservation_id,
+    row.reservationSfid,
+    row.reservationSFID,
+    row.sfid,
+    row.salesforceId,
+    row.id,
+    row.Id,
+  );
+  const directMatch = String(direct || "").match(/a0f[A-Za-z0-9]+/i)?.[0];
+  if (directMatch) return directMatch;
+  for (const value of Object.values(row || {})) {
+    if (typeof value !== "string") continue;
+    const match = value.match(/a0f[A-Za-z0-9]+/i)?.[0];
+    if (match) return match;
+  }
+  return null;
+}
+
 function normalizeRentalStoreObject(row) {
-  const id = first(row.id, row.reservationID, row.reservationId, row.reservation_id, row.Id, row.sfid);
-  if (!id || !/^a0f[a-z0-9]+$/i.test(String(id))) return null;
+  const id = reservationIdFromObject(row);
+  if (!id) return null;
   const checkIn = dateOnly(first(row.checkIn, row.checkInString, row.check_in, row.startDate, row.arrivalDate));
   const checkOut = dateOnly(first(row.checkOut, row.checkOutString, row.check_out, row.endDate, row.departureDate));
   const nights = numberFirst(row.nights, row.numberOfNights, row.number_of_nights, diffNights(checkIn, checkOut));
