@@ -11,7 +11,7 @@ const required = [
   "EMAIL_FROM",
   "DVC_MONITOR_INGEST_TOKEN",
   "DVC_MONITOR_ADMIN_TOKEN",
-  "GITHUB_DISPATCH_TOKEN",
+  "DVC_GITHUB_DISPATCH_TOKEN",
 ];
 const missing = required.filter(name => !process.env[name]?.trim());
 if (missing.length) throw new Error("Missing GitHub Actions secrets: " + missing.join(", "));
@@ -80,7 +80,7 @@ writeFileSync(secretsPath, JSON.stringify({
   EMAIL_FROM: process.env.EMAIL_FROM,
   INGEST_TOKEN: process.env.DVC_MONITOR_INGEST_TOKEN,
   ADMIN_TOKEN: process.env.DVC_MONITOR_ADMIN_TOKEN,
-  GITHUB_DISPATCH_TOKEN: process.env.GITHUB_DISPATCH_TOKEN,
+  GITHUB_DISPATCH_TOKEN: process.env.DVC_GITHUB_DISPATCH_TOKEN,
 }), { mode: 0o600 });
 
 function run(command, args, options = {}) {
