@@ -1,0 +1,96 @@
+name: Verify DVC monitor state
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/run-verify.once"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify live Worker, D1 health and Rental Store snapshot
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DVC_MONITOR_BASE_URL: ${{ secrets.DVC_MONITOR_BASE_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { URLS } from './src/config.js';
+          import { parseKeyholder, byId, fingerprint } from './src/parsers.js';
+
+          const required = ['CLOUDFLARE_API_TOKEN','CLOUDFLARE_ACCOUNT_ID','DVC_MONITOR_BASE_URL'];
+          for (const key of required) if (!process.env[key]) throw new Error(`${key} missing`);
+
+          const base = process.env.DVC_MONITOR_BASE_URL.replace(/\/$/, '');
+          const healthResponse = await fetch(`${base}/health`);
+          if (!healthResponse.ok) throw new Error(`Worker health HTTP ${healthResponse.status}`);
+          const health = await healthResponse.json();
+          console.log('WORKER_HEALTH=' + JSON.stringify({
+            ok: health.ok,
+            cron: health.cron,
+            checkedAt: health.checkedAt,
+            emailUsageToday: health.emailUsageToday,
+            health: health.health,
+          }, null, 2));
+
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const headers = {
+            Authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
+            'Content-Type': 'application/json',
+          };
+          const dbList = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database?name=dvc-monitor-state&per_page=100`, { headers });
+          const dbBody = await dbList.json();
+          if (!dbList.ok || !dbBody.success) throw new Error('Could not list D1 database');
+          const db = (dbBody.result || []).find(row => row.name === 'dvc-monitor-state');
+          if (!db?.uuid) throw new Error('dvc-monitor-state not found');
+
+          async function query(sql, params = []) {
+            const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${db.uuid}/query`, {
+              method: 'POST', headers, body: JSON.stringify({ sql, params }),
+            });
+            const body = await r.json();
+            if (!r.ok || !body.success) throw new Error(`D1 query failed: ${JSON.stringify(body.errors || body)}`);
+            return body.result?.[0]?.results || [];
+          }
+
+          const sourceRows = await query(`SELECT source, ok, last_checked_at, last_success_at, consecutive_failures, last_error, details FROM health ORDER BY source`);
+          console.log('D1_SOURCE_HEALTH=' + JSON.stringify(sourceRows, null, 2));
+          const snapshotRows = await query(`SELECT source, updated_at FROM snapshots ORDER BY source`);
+          console.log('D1_SNAPSHOTS=' + JSON.stringify(snapshotRows, null, 2));
+          const alertCounts = await query(`SELECT source, COUNT(*) AS sent_count, MIN(sent_at) AS first_sent, MAX(sent_at) AS last_sent FROM alerts WHERE status='sent' AND sent_at >= datetime('now','-2 hours') GROUP BY source ORDER BY source`);
+          console.log('RECENT_ALERT_COUNTS=' + JSON.stringify(alertCounts, null, 2));
+
+          const snapshotResult = await query(`SELECT payload, updated_at FROM snapshots WHERE source='rental-store-all'`);
+          if (!snapshotResult[0]?.payload) throw new Error('rental-store-all snapshot missing');
+          const previous = JSON.parse(snapshotResult[0].payload);
+
+          const apiResponse = await fetch(URLS.rentalStoreApi, { headers: { Accept: 'application/json', 'User-Agent': 'DVC-Monitor-Verification/1.0' } });
+          if (!apiResponse.ok) throw new Error(`Rental Store API HTTP ${apiResponse.status}`);
+          const currentRows = parseKeyholder(await apiResponse.json());
+          const current = byId(currentRows);
+          const previousIds = new Set(Object.keys(previous));
+          const currentIds = new Set(Object.keys(current));
+          const newIds = [...currentIds].filter(id => !previousIds.has(id));
+          const removedIds = [...previousIds].filter(id => !currentIds.has(id));
+          const changedIds = [...currentIds].filter(id => previous[id] && fingerprint(previous[id]) !== fingerprint(current[id]));
+          console.log('RENTAL_STORE_COMPARE=' + JSON.stringify({
+            snapshotUpdatedAt: snapshotResult[0].updated_at,
+            previousCount: previousIds.size,
+            currentCount: currentIds.size,
+            newCount: newIds.length,
+            changedCount: changedIds.length,
+            removedCount: removedIds.length,
+            sampleNew: newIds.slice(0, 10),
+            sampleChanged: changedIds.slice(0, 10),
+          }, null, 2));
+          NODE
