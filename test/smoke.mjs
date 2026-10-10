@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { WATCHES, EMAIL_LIMITS } from "../src/config.js";
-import { parseKeyholder, parseDavids, parseDvcShop, fingerprint } from "../src/parsers.js";
+import { parseKeyholder, parseDavids, parseDvcShop, fingerprint, formatListing } from "../src/parsers.js";
 
 assert.equal(WATCHES.rentalStoreNightly.match({ nightly: 200.99 }), true);
 assert.equal(WATCHES.rentalStoreNightly.match({ nightly: 201.00 }), false);
 assert.equal(WATCHES.rentalStorePoints.match({ pointPrice: 11.99 }), true);
 assert.equal(WATCHES.rentalStorePoints.match({ pointPrice: 12.00 }), false);
+assert.equal(WATCHES.rentalStorePoints.match({ pointPrice: 11.50, effectivePointPrice: 12.50 }), false);
+assert.equal(WATCHES.rentalStorePoints.match({ pointPrice: 12.50, effectivePointPrice: 11.50 }), true);
 assert.equal(WATCHES.rentalStoreAll.match({ nightly: 9999 }), true);
 assert.equal(WATCHES.davids.match({ nightly: 299.99, room: "Deluxe Studio", pointPrice: 24 }), true);
 assert.equal(WATCHES.davids.match({ nightly: 300, room: "Deluxe Studio", pointPrice: 24 }), false);
@@ -27,9 +29,11 @@ const keyholder = parseKeyholder({ data: [{
 assert.equal(keyholder.length, 1);
 assert.equal(keyholder[0].nights, 4);
 assert.equal(keyholder[0].nightly, 200);
+assert.equal(keyholder[0].effectivePointPrice, 10);
 assert.equal(keyholder[0].pointPrice, 10);
 assert.equal(keyholder[0].bookingUrl.endsWith("/a0fTEST123/"), true);
-assert.equal(fingerprint(keyholder[0]), "800|200|10|80");
+assert.ok(formatListing(keyholder[0]).includes("80 points"));
+assert.ok(formatListing(keyholder[0]).includes("$10/point effective"));
 
 const davids = parseDavids(`
 <a href="/dvc-guests/confirmed-reservations-for-rent/10052397">Request Now</a>
@@ -39,7 +43,8 @@ Total Cost (Points): 90 Price Per Point: $16 Total Cost (USD): $1,440 Sleeps: 5
 `);
 assert.equal(davids.length, 1);
 assert.equal(davids[0].id, "10052397");
-assert.equal(davids[0].pointPrice, 16);
+assert.equal(davids[0].listedPointPrice, 16);
+assert.equal(davids[0].effectivePointPrice, 16);
 assert.equal(WATCHES.davids.match(davids[0]), true);
 
 const dvcShop = parseDvcShop(`
