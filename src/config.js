@@ -62,14 +62,14 @@ export const WATCHES = {
   },
 };
 
-// With Pushover e-mail gateway enabled, each alert is delivered to two
-// recipients (Gmail + Pushover). These are conservative *message* limits so
-// total Brevo recipient deliveries remain below the 300/day free allowance.
+// With primary Gmail + dedicated Gmail + Pushover enabled, one alert can
+// consume three Brevo recipient deliveries. These conservative message limits
+// keep total deliveries below the 300/day free allowance.
 export const EMAIL_LIMITS = {
-  providerDaily: 150,
-  warningAt: 110,
-  lowPriorityCutoff: 125,
-  hardSafetyCutoff: 145,
+  providerDaily: 100,
+  warningAt: 75,
+  lowPriorityCutoff: 85,
+  hardSafetyCutoff: 95,
 };
 
 export const SOURCE_EXPECTED_MINUTES = {
