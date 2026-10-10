@@ -132,13 +132,28 @@ export function parseDvcShop(html) {
 }
 
 export function fingerprint(r) {
+  const total = numFirst(r?.total);
+  const nights = numFirst(r?.nights, diffNights(r?.checkIn, r?.checkOut));
+  const nightly = numFirst(r?.nightly, div(total, nights));
+  const points = numFirst(r?.points);
+  const effectivePointPrice = numFirst(r?.effectivePointPrice, div(total, points));
+  const listedPointPrice = numFirst(r?.listedPointPrice, r?.pointPrice);
+
+  // Keep this based on stable, user-visible reservation facts. Older D1
+  // snapshots may not have newer derived fields such as effectivePointPrice
+  // or listedPointPrice, so derive/fallback here instead of treating a parser
+  // upgrade as hundreds of reservation changes.
   return [
-    round(r.total),
-    round(r.nightly),
-    round(r.effectivePointPrice),
-    round(r.listedPointPrice),
-    round(r.pointPrice),
-    round(r.points),
+    fingerprintText(r?.resort),
+    fingerprintText(r?.room),
+    iso(r?.checkIn) || clean(r?.checkIn),
+    iso(r?.checkOut) || clean(r?.checkOut),
+    round(nights),
+    round(total),
+    round(nightly),
+    round(points),
+    round(effectivePointPrice),
+    round(listedPointPrice),
   ].join("|");
 }
 
@@ -283,6 +298,10 @@ function addDays(a, nights) {
 
 function clean(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function fingerprintText(value) {
+  return clean(value).toLowerCase();
 }
 
 function abs(href, base) {
