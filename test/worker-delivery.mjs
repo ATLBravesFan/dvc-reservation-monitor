@@ -3,7 +3,7 @@ import worker from "../src/index.js";
 
 // Exercise the real authenticated Worker route and Brevo request construction
 // with an in-memory D1 adapter. No real emails, secrets, or production writes.
-const rows=new Map(), counters=new Map(), ledger=new Map();
+const rows=new Map(), counters=new Map(), ledger=new Map(), leases=new Map();
 let sends=0, providerStatus=201;
 const realFetch=globalThis.fetch;
 globalThis.fetch=async (url,opts)=>{
@@ -27,6 +27,9 @@ function db(){
   return {results:[]};
  },
  async run(){
+  if(sql.includes("INSERT INTO execution_leases")){const [source,token,,expires]=args;if(leases.has(source)&&leases.get(source).expires>Date.now())return {meta:{changes:0}};leases.set(source,{token,expires:Date.parse(expires)});return {meta:{changes:1}};}
+  if(sql.includes("INSERT INTO execution_history")||sql.includes("UPDATE execution_history"))return {meta:{changes:1}};
+  if(sql.includes("DELETE FROM execution_leases")){const l=leases.get(args[0]);if(l?.token===args[1])leases.delete(args[0]);return {meta:{changes:1}};}
   if(sql.includes("INSERT OR IGNORE INTO alert_outbox")){
    if(rows.has(args[0]))return {meta:{changes:0}};
    rows.set(args[0],{alert_key:args[0],source:args[1],listing_id:args[2],payload:args[3],status:"pending",attempts:0,title:args[6],show_matches:args[7],priority:args[8]});return {meta:{changes:1}};
