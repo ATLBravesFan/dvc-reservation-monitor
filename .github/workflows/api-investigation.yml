@@ -12,7 +12,7 @@ permissions:
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,17 +20,27 @@ jobs:
           node-version: "22"
       - name: Install browser dependency
         run: npm install --omit=dev --no-audit --no-fund
-      - name: Inspect public endpoints and browser network traffic
+      - name: Inspect DVC-Rental and DVC Shop public data paths
         env:
           CHROME_PATH: /usr/bin/google-chrome
         run: node scripts/api-investigation.mjs | tee api-investigation-report.txt
       - name: Compare DVC-Rental raw HTTP response
         run: node scripts/dvc-rental-raw-probe.mjs | tee -a api-investigation-report.txt
+      - name: Probe David's and Rare Finds public data paths
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node scripts/other-sources-probe.mjs | tee -a api-investigation-report.txt
+      - name: Validate direct DVC-Rental data against browser and detail pages
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+          COMPARE_ITERATIONS: "3"
+        run: node scripts/dvc-rental-compare.mjs | tee -a api-investigation-report.txt
       - name: Upload investigation report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: api-investigation-report
           path: |
             api-investigation-report.txt
             dvc-rental-raw.html
-          if-no-files-found: error
+          if-no-files-found: warn
