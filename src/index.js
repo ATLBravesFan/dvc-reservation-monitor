@@ -395,7 +395,12 @@ async function drainOutbox(env, store, limit = 20) {
     if (count >= EMAIL_LIMITS.hardSafetyCutoff) break;
     if (!row.priority && count >= EMAIL_LIMITS.lowPriorityCutoff) continue;
     if (!await claimOutbox(env.DB,row.alert_key)) continue;
-    const event = JSON.parse(row.payload);
+    let event;
+    try { event = JSON.parse(row.payload); }
+    catch (error) {
+      await markOutboxUncertain(env.DB,row.alert_key,"Invalid stored alert payload: "+errorMessage(error));
+      continue;
+    }
     let providerCalled = false;
     try {
       if (!env.BREVO_API_KEY || !env.EMAIL_TO || !env.EMAIL_FROM) {
