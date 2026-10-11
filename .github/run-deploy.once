@@ -1,1 +1,1 @@
-Deploy per-watch last added and last changed timestamps on the monitor dashboard, persisted in D1 after successful alerts. Preserve all watch filters and scheduling.
+Deploy website dispatch health freshness threshold of eight minutes for the five-minute dispatch schedule. No changes to watches, alerts, or credentials.
