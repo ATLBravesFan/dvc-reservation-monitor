@@ -1,1 +1,1 @@
-Deploy website dispatch health freshness threshold of eight minutes for the five-minute dispatch schedule. No changes to watches, alerts, or credentials.
+Deploy direct DVC-Rental structured-data primary checks every five minutes while keeping the existing browser workflow as a ten-minute fallback. Parser and live-inventory verification passed before deployment.
