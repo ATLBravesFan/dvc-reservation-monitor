@@ -368,6 +368,21 @@ async function sendEvents(env, store, source, title, events, showMatches) {
     await sendEmail(env, title, claimed, showMatches);
     for (const event of claimed) await store.markAlertSent(event.alertKey);
     const after = await store.incrementEmailCount();
+    // Record only successfully delivered reservation events, never unchanged polls.
+    const watchEvents = new Map();
+    const add = (key, event) => watchEvents.set(key, [...(watchEvents.get(key) || []), event]);
+    for (const event of claimed) {
+      if (source === "dvc-rental-store") {
+        add("rentalStoreAll", event);
+        if (WATCHES.rentalStoreNightly.match(event.listing)) add("rentalStoreNightly", event);
+        if (WATCHES.rentalStorePoints.match(event.listing)) add("rentalStorePoints", event);
+      } else {
+        add(source === "dvc-rental" ? "dvcRental" : source === "dvc-shop" ? "dvcShop" : source, event);
+      }
+    }
+    for (const [watchKey, watchItems] of watchEvents) {
+      try { await store.recordWatchEvents([watchKey], watchItems); } catch { /* email was already delivered */ }
+    }
     await maybeSendEmailCapacityWarning(env, store, after);
     return { sent: claimed.length, deferred: false };
   } catch (error) {
@@ -479,6 +494,8 @@ async function statusResponse(env, store, html) {
     return { ...item, expectedMinutes: expected || null, stale };
   });
   const emailCount = await store.getEmailCount();
+  const watchKeys = Object.keys(WATCHES);
+  const watchActivity = await Promise.all(watchKeys.map(key => store.getMeta(`watch-events:${key}`)));
   const lastScheduled = await store.getMeta("last-scheduled");
   const degraded = healthWithStale.some(item => !item.ok || item.stale || item.consecutiveFailures >= 3);
 
@@ -486,15 +503,19 @@ async function statusResponse(env, store, html) {
     ok: !degraded,
     storage: "Cloudflare D1",
     cron: "every minute",
-    watches: Object.values(WATCHES).map(watch => ({
+    watches: Object.entries(WATCHES).map(([key, watch], index) => ({
+      key,
       title: watch.title,
       interval: watch.interval,
       priceChanges: watch.priceChanges,
+      lastAddedAt: watchActivity[index]?.lastAddedAt || null,
+      lastChangedAt: watchActivity[index]?.lastChangedAt || null,
+      lastActivityAt: watchActivity[index]?.lastActivityAt || null,
     })),
     rentalStoreWebsiteBackup: {
-      requestedInterval: "1 minute",
+      requestedInterval: "5 minutes",
       trigger: "Cloudflare Worker dispatches GitHub browser workflow",
-      githubCronFallback: "5 minutes",
+      githubCronFallback: "15 minutes",
     },
     emailUsageToday: {
       sent: emailCount,
@@ -523,6 +544,10 @@ async function statusResponse(env, store, html) {
   <h1>DVC Monitor</h1><p class="${degraded ? "bad" : ""}">Overall status: ${degraded ? "CHECK REQUIRED" : "OK"}</p>
   <p>Email sends today: ${emailCount} / ${EMAIL_LIMITS.providerDaily}. D1 storage is active.</p>
   <table><thead><tr><th>Source</th><th>Status</th><th>Last check</th><th>Last success</th><th>Failures</th><th>Last error</th></tr></thead><tbody>${rows}</tbody></table>
+  <h2>Reservation watches</h2>
+  <p>Last added and last changed show when a matching reservation alert was successfully sent. Empty means no recorded alert since this feature was enabled.</p>
+  <table><thead><tr><th>Watch</th><th>Interval</th><th>Last added</th><th>Last changed</th></tr></thead><tbody>${payload.watches.map(watch => `<tr><td>${escapeHtml(watch.title)}</td><td>${escapeHtml(watch.interval)}</td><td class="time" data-utc="${escapeHtml(watch.lastAddedAt || "")}">${escapeHtml(watch.lastAddedAt || "—")}</td><td class="time" data-utc="${escapeHtml(watch.lastChangedAt || "")}">${escapeHtml(watch.lastChangedAt || "—")}</td></tr>`).join("")}</tbody></table>
+  <script>document.querySelectorAll(".time[data-utc]").forEach(cell => { const value = cell.dataset.utc; if (value) cell.textContent = new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "short", timeStyle: "short" }) + " ET"; });</script>
   <h2>Details</h2><pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre></body></html>`, {
     headers: { "content-type": "text/html;charset=utf-8" },
   });
