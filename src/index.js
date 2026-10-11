@@ -474,7 +474,6 @@ async function maybeSendEmailCapacityWarning(env, store, currentCount) {
   try {
     await sendBrevo(
       env,
-      store,
       "DVC Monitor email-capacity warning",
       `<p>The monitor has sent ${currentCount} emails today. Low-priority alerts pause at ${EMAIL_LIMITS.lowPriorityCutoff}; bargain alerts remain enabled until the ${EMAIL_LIMITS.hardSafetyCutoff} safety cutoff.</p>`,
     );
