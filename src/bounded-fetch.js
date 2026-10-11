@@ -12,7 +12,7 @@ export async function boundedFetch(url, options = {}) {
     const response = await fetch(url, { ...options, signal: controller.signal });
     // The caller may read the body after fetch resolves. The timeout should
     // also cover that read, so release the timer when the body is consumed.
-    if (!response.body) {
+    if (!response.body || response.status === 204 || response.status === 205 || response.status === 304) {
       clearTimeout(timer);
       return response;
     }
@@ -31,6 +31,9 @@ export async function boundedFetch(url, options = {}) {
       },
     });
     return new Response(stream, { status: response.status, statusText: response.statusText, headers: response.headers });
+  } catch (error) {
+    clearTimeout(timer);
+    throw error;
   } finally {
     upstreamSignal?.removeEventListener("abort", abortFromUpstream);
   }
