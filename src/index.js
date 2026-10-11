@@ -384,6 +384,7 @@ async function sendEvents(env, store, source, title, events, showMatches) {
 }
 
 async function drainOutbox(env, store, limit = 20) {
+  return withLease(env.DB, 'alert-outbox-drain', async () => {
   await quarantineExpiredSends(env.DB);
   const rows = (await env.DB.prepare(`SELECT * FROM alert_outbox WHERE status='pending'
     AND (next_attempt_at IS NULL OR next_attempt_at<=?)
@@ -450,6 +451,7 @@ async function drainOutbox(env, store, limit = 20) {
     }
   }
   return { sent, inspected: rows.length };
+  }, 120);
 }
 
 function alertKey(source, listing) {
