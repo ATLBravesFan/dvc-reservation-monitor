@@ -30,17 +30,30 @@ if (config.name !== "dvc-reservation-monitor") throw new Error("Unexpected Worke
 const workerMain = join(repoRoot, config.main);
 config.main = workerMain;
 
-// Pushover's e-mail gateway address is kept only in GitHub/Cloudflare secrets.
-// The wrapper Worker imports src/index.js, where the standard monitor sends
-// Brevo mail, so inject the BCC into that notification module rather than the
-// top-level wrapper entrypoint. The address is never committed.
-if (process.env.PUSHOVER_EMAIL?.trim()) {
+// EMAIL_TO is the notification-only Gmail account. EMAIL_FROM is the primary
+// Gmail address already used by the monitor as its sender identity. During
+// deployment, add the primary address as a CC whenever the two addresses differ,
+// so every DVC alert is stored in the primary inbox while the notification-only
+// Gmail account can be the only Gmail account with iPhone push enabled.
+// Keep Pushover as a BCC backup without ever committing its gateway address.
+{
   const notificationModule = join(repoRoot, "src", "index.js");
   const original = readFileSync(notificationModule, "utf8");
   const needle = "      to: [{ email: env.EMAIL_TO }],";
-  const replacement = `${needle}\n      ...(env.PUSHOVER_EMAIL ? { bcc: [{ email: env.PUSHOVER_EMAIL }] } : {}),`;
-  if (!original.includes(needle)) throw new Error("Could not locate Brevo recipient block for Pushover injection");
+  const replacement = `${needle}\n      ...(env.EMAIL_FROM && env.EMAIL_FROM.trim().toLowerCase() !== env.EMAIL_TO.trim().toLowerCase() ? { cc: [{ email: env.EMAIL_FROM.trim() }] } : {}),\n      ...(env.PUSHOVER_EMAIL ? { bcc: [{ email: env.PUSHOVER_EMAIL }] } : {}),`;
+  if (!original.includes(needle)) throw new Error("Could not locate standard Brevo recipient block for dual-Gmail routing");
   writeFileSync(notificationModule, original.replace(needle, replacement));
+}
+
+// Rare Finds has its own mail helper and already contains the Pushover BCC.
+// Add the same primary-Gmail copy there as well.
+{
+  const rareFindsModule = join(repoRoot, "src", "rare-finds.js");
+  const original = readFileSync(rareFindsModule, "utf8");
+  const needle = "      to: [{ email: env.EMAIL_TO }],";
+  const replacement = `${needle}\n      ...(env.EMAIL_FROM && env.EMAIL_FROM.trim().toLowerCase() !== env.EMAIL_TO.trim().toLowerCase() ? { cc: [{ email: env.EMAIL_FROM.trim() }] } : {}),`;
+  if (!original.includes(needle)) throw new Error("Could not locate Rare Finds Brevo recipient block for dual-Gmail routing");
+  writeFileSync(rareFindsModule, original.replace(needle, replacement));
 }
 
 const apiRoot = `https://api.cloudflare.com/client/v4/accounts/${account}`;
@@ -128,6 +141,7 @@ try {
   const url = combined.match(/https:\/\/[A-Za-z0-9.-]+\.workers\.dev\/?/)?.[0] || null;
   console.log(`D1 database UUID: ${database.uuid}`);
   if (url) console.log(`DVC_MONITOR_BASE_URL=${url}`);
+  console.log(`Primary Gmail copy: ${process.env.EMAIL_FROM?.trim() && process.env.EMAIL_FROM.trim().toLowerCase() !== process.env.EMAIL_TO.trim().toLowerCase() ? "enabled" : "same as notification inbox"}`);
   console.log(`Pushover e-mail gateway: ${process.env.PUSHOVER_EMAIL?.trim() ? "enabled" : "not configured"}`);
   console.log("Deployment complete. Keep ChangeDetection enabled until the 48-hour parallel verification is complete.");
 } finally {
