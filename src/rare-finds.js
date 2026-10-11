@@ -1,3 +1,4 @@
+import { boundedFetch } from "./bounded-fetch.js";
 import { EMAIL_LIMITS, URLS, WATCHES } from "./config.js";
 import { byId, formatListing } from "./parsers.js";
 import { Storage, utcDay } from "./storage.js";
@@ -62,7 +63,7 @@ export function parseRareFinds(html, now = new Date()) {
 export async function runRareFinds(env, now = new Date()) {
   const store = new Storage(env.DB);
   try {
-    const response = await fetch(URLS.rareFindsList, {
+    const response = await boundedFetch(URLS.rareFindsList, {
       headers: {
         Accept: "text/html,application/xhtml+xml",
         "User-Agent": "Mozilla/5.0 (compatible; DVC-Monitor/2.0)",
@@ -261,7 +262,7 @@ async function sendBrevo(env, subject, htmlBody) {
   if (!env.BREVO_API_KEY || !env.EMAIL_TO || !env.EMAIL_FROM) {
     throw new Error("Email is not configured: BREVO_API_KEY, EMAIL_TO and EMAIL_FROM are required");
   }
-  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+  const response = await boundedFetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
       Accept: "application/json",
