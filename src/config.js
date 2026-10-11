@@ -65,7 +65,7 @@ export const WATCHES = {
   },
   dvcRental: {
     title: "DVC-Rental New Confirmed Reservations",
-    interval: "10 minutes",
+    interval: "5 minutes",
     priceChanges: false,
     match: () => true,
   },
@@ -101,6 +101,7 @@ export const SOURCE_EXPECTED_MINUTES = {
   "davids": 8,
   "dvc-shop": 15,
   "dvc-rental": 15,
+  "dvc-rental-direct": 8,
   "dvc-rental-dispatch": 13,
   "dvcreservations-rare-finds": 20,
 };
