@@ -4,6 +4,7 @@ import { parseKeyholder, parseExternalRentalStore, parseDavids, parseDvcShop, fi
 import { Storage, utcDay } from "./storage.js";
 import { withLease } from "./execution-lease.js";
 import { assertInventoryHealthy } from "./inventory-guard.js";
+import { enqueueOutbox, claimOutbox, markOutboxSent, markOutboxUncertain, requeueOutbox, quarantineExpiredSends } from "./alert-outbox.js";
 
 const RENTAL_STORE_BACKUP_WORKFLOW = "dvc-rental-store-website-backup.yml";
 const GITHUB_REPO = "ATLBravesFan/dvc-reservation-monitor";
@@ -62,6 +63,7 @@ function runScheduled(env, now, ctx) {
   // Crucial: register each watch independently. Never make a scheduled
   // invocation wait for all sources or for a shared D1 heartbeat.
   // An indefinitely stalled watch cannot hold other checks hostage.
+  ctx.waitUntil(drainOutbox(env, store, 20).catch(error => console.error("outbox drain failed",errorMessage(error))));
   const jobs = [
     ["rentalStore", () => tracked(env, store, "rental-store-api", () => pollRentalStore(env, store, tenMinuteCycle))],
     ["dvcShop", () => pollDvcShop(env, store)],
@@ -109,6 +111,7 @@ async function runManual(env, store, mode) {
   if (mode === "slow") return { slower: await pollSlowerHttpSources(env, store) };
   if (mode === "dvc-shop") return { dvcShop: await pollDvcShop(env, store) };
   if (mode === "davids") return { davids: await pollDavids(env, store) };
+  if (mode === "drain-outbox") return { outbox: await drainOutbox(env,store,20) };
   if (mode === "test-email") {
     await sendSystemEmail(env, store, "DVC Monitor test email", "The DVC monitor email connection is working.");
     return { testEmail: { ok: true } };
@@ -368,50 +371,55 @@ async function processStandardWatch(env, store, key, watch, rows) {
 
 async function sendEvents(env, store, source, title, events, showMatches) {
   if (!events.length) return { sent: 0, deferred: false };
-
   const priority = events.some(event => (event.matches || bargainMatches(event.listing)).length > 0);
-  const count = await store.getEmailCount();
-
-  if (count >= EMAIL_LIMITS.hardSafetyCutoff || (!priority && count >= EMAIL_LIMITS.lowPriorityCutoff)) {
-    return { sent: 0, deferred: true };
-  }
-
-  const claimed = [];
+  // Persist before advancing snapshots. Repeated source polls cannot create duplicate keys.
   for (const event of events) {
     const key = alertKey(source, event.listing);
-    if (await store.claimAlert(key, source, String(event.listing.id), fingerprint(event.listing))) {
-      claimed.push({ ...event, alertKey: key });
-    }
+    await enqueueOutbox(env.DB, { key, source, listingId: event.listing.id, event,
+      title, showMatches, priority: (event.matches || bargainMatches(event.listing)).length > 0 });
   }
-  if (!claimed.length) return { sent: 0, deferred: false };
+  // Sending is independent of source snapshot updates. The scheduled drain retries pending work.
+  const result = await drainOutbox(env, store, 20);
+  return { sent: result.sent, deferred: false };
+}
 
-  try {
-    await sendEmail(env, title, claimed, showMatches);
-    for (const event of claimed) await store.markAlertSent(event.alertKey);
-    const after = await store.incrementEmailCount();
-    // Record only successfully delivered reservation events, never unchanged polls.
-    const watchEvents = new Map();
-    const add = (key, event) => watchEvents.set(key, [...(watchEvents.get(key) || []), event]);
-    for (const event of claimed) {
-      if (source === "dvc-rental-store") {
-        add("rentalStoreAll", event);
-        if (WATCHES.rentalStoreNightly.match(event.listing)) add("rentalStoreNightly", event);
-        if (WATCHES.rentalStorePoints.match(event.listing)) add("rentalStorePoints", event);
-      } else {
-        add(source === "dvc-rental" ? "dvcRental" : source === "dvc-shop" ? "dvcShop" : source, event);
-      }
+async function drainOutbox(env, store, limit = 20) {
+  await quarantineExpiredSends(env.DB);
+  const rows = (await env.DB.prepare(`SELECT * FROM alert_outbox WHERE status='pending'
+    AND (next_attempt_at IS NULL OR next_attempt_at<=?)
+    ORDER BY priority DESC,created_at ASC LIMIT ?`)
+    .bind(new Date().toISOString(),limit).all()).results || [];
+  let sent = 0;
+  for (const row of rows) {
+    const count = await store.getEmailCount();
+    if (count >= EMAIL_LIMITS.hardSafetyCutoff ||
+        (!row.priority && count >= EMAIL_LIMITS.lowPriorityCutoff)) break;
+    if (!await claimOutbox(env.DB,row.alert_key)) continue;
+    const event = JSON.parse(row.payload);
+    let providerCalled = false;
+    try {
+      providerCalled = true;
+      await sendEmail(env,row.title || row.source,[event],Boolean(row.show_matches));
+      // Brevo accepted the email; a D1 failure after this point is ambiguous.
+      await markOutboxSent(env.DB,row.alert_key);
+      await store.markAlertSent(row.alert_key);
+      const after = await store.incrementEmailCount();
+      sent++;
+      try {
+        const watchKeys = row.source === "dvc-rental-store"
+          ? ["rentalStoreAll",...(WATCHES.rentalStoreNightly.match(event.listing)?["rentalStoreNightly"]:[]),
+             ...(WATCHES.rentalStorePoints.match(event.listing)?["rentalStorePoints"]:[])]
+          : [row.source === "dvc-rental"?"dvcRental":row.source === "dvc-shop"?"dvcShop":row.source];
+        await store.recordWatchEvents(watchKeys,[event]);
+        await maybeSendEmailCapacityWarning(env,store,after);
+      } catch (error) { console.error("post-send metadata failed",errorMessage(error)); }
+    } catch (error) {
+      if (providerCalled) await markOutboxUncertain(env.DB,row.alert_key,errorMessage(error));
+      else await requeueOutbox(env.DB,row.alert_key,errorMessage(error));
+      console.error("outbox delivery requires review",row.alert_key,errorMessage(error));
     }
-    for (const [watchKey, watchItems] of watchEvents) {
-      try { await store.recordWatchEvents([watchKey], watchItems); } catch { /* email was already delivered */ }
-    }
-    await maybeSendEmailCapacityWarning(env, store, after);
-    return { sent: claimed.length, deferred: false };
-  } catch (error) {
-    for (const event of claimed) {
-      try { await store.releaseAlert(event.alertKey); } catch { /* retry claim will expire anyway */ }
-    }
-    throw error;
   }
+  return { sent, inspected: rows.length };
 }
 
 function alertKey(source, listing) {
