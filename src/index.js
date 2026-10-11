@@ -527,12 +527,14 @@ async function statusResponse(env, store, html) {
     const stale = expected ? (!Number.isFinite(checkedAt) || now - checkedAt > expected * 60_000) : false;
     return { ...item, expectedMinutes: expected || null, stale };
   });
+  const outboxCounts = (await env.DB.prepare("SELECT status, COUNT(*) AS count FROM alert_outbox GROUP BY status").all()).results || [];
+  const outbox = Object.fromEntries(outboxCounts.map(item => [item.status, Number(item.count)]));
   const emailCount = await store.getEmailCount();
   const watchKeys = Object.keys(WATCHES);
   const watchActivity = await Promise.all(watchKeys.map(key => store.getMeta(`watch-events:${key}`)));
   const lastScheduled = await store.getMeta("last-scheduled");
   const lastScheduledStart = await store.getMeta("last-scheduled-start");
-  const degraded = healthWithStale.some(item => !item.ok || item.stale || item.consecutiveFailures >= 3);
+  const degraded = healthWithStale.some(item => !item.ok || item.stale || item.consecutiveFailures >= 3) || (outbox.uncertain || 0) > 0;
 
   const payload = {
     ok: !degraded,
@@ -552,6 +554,8 @@ async function statusResponse(env, store, html) {
       trigger: "Cloudflare Worker dispatches GitHub browser workflow",
       githubCronFallback: "15 minutes",
     },
+    alertOutbox: { pending: outbox.pending || 0, sending: outbox.sending || 0,
+      sent: outbox.sent || 0, uncertain: outbox.uncertain || 0 },
     emailUsageToday: {
       sent: emailCount,
       providerDailyLimit: EMAIL_LIMITS.providerDaily,
