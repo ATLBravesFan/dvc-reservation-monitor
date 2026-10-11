@@ -82,6 +82,24 @@ export class Storage {
     `).bind(key, JSON.stringify(value), now).run();
   }
 
+  async recordWatchEvents(watchKeys, events) {
+    const now = new Date().toISOString();
+    const keys = [...new Set(watchKeys)];
+    for (const key of keys) {
+      const metaKey = `watch-events:${key}`;
+      const previous = (await this.getMeta(metaKey)) || {};
+      const added = events.filter(event => event.type === "NEW").length;
+      const changed = events.length - added;
+      await this.putMeta(metaKey, {
+        lastAddedAt: added ? now : (previous.lastAddedAt || null),
+        lastChangedAt: changed ? now : (previous.lastChangedAt || null),
+        lastActivityAt: now,
+        lastActivityType: added && changed ? "new and changed" : added ? "new" : "changed",
+        lastActivityCount: events.length,
+      });
+    }
+  }
+
   async recordHealth(source, ok, details = null, error = null) {
     const now = new Date().toISOString();
     const existing = await this.db.prepare("SELECT consecutive_failures, last_success_at FROM health WHERE source = ?")
