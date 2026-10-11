@@ -1,1 +1,1 @@
-Deploy and verify complete DVC-Rental alert details. The browser fallback must use the structured reservation data when available and must refuse to ingest partial rows missing room, dates, nights, total, nightly price, or points. Preserve weekend bargain labels, dual-Gmail delivery, Pushover backup, D1 deduplication, and existing monitor schedules.
+Deploy bounded 12-second upstream HTTP requests for all Worker sources, scheduler start heartbeat, and independent watch execution. Prevent hung upstream requests from leaving scheduled cycles incomplete.
