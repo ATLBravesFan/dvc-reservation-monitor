@@ -8,11 +8,13 @@ Free-tier DVC confirmed-reservation monitoring built with Cloudflare Workers + D
 |---|---:|---|
 | DVC Rental Store under $201 | every minute | new + price changes below `$201/night` |
 | DVC Rental Store under $12/point | every minute | new + price changes below `$12/point` |
-| DVC Rental Store website backup | requested every minute; 5-minute GitHub cron fallback | new + price changes matching either fast Rental Store filter |
+| DVC Rental Store website backup | requested every 5 minutes; 15-minute GitHub cron fallback | new + price changes matching either fast Rental Store filter |
 | DVC Rental Store - All Reservations | every 10 minutes | all new reservations + price changes |
 | David's Vacation Rentals | every 5 minutes | `< $300/night` OR 1/2/3-bedroom `< $17/point`; new + price changes |
-| DVC-Rental | every 10 minutes | all newly listed confirmed reservations across all pages |
-| DVC Shop | every 10 minutes | newly available confirmed reservations |
+| DVC-Rental direct primary | every 5 minutes | all newly listed confirmed reservations from structured `/deals` data |
+| DVC-Rental browser fallback | every 10 minutes | browser verification/fallback using the same D1 state and deduplication |
+| DVC Shop | every minute | newly available confirmed reservations |
+| DVCReservations Rare Finds | every 15 minutes | new reservations + price changes |
 
 Any monitored source that exposes enough price data is also checked for the priority bargain thresholds `< $201/night` and `< $12/point`. A matching event gets a flame subject so it stands out in Gmail and Pushover. The nightly threshold can be evaluated for every current source. Point-price matching requires the source to expose point count or point price; Rental Store and David's currently do so, while the current DVC-Rental and DVC Shop listing feeds do not reliably expose point pricing.
 
@@ -22,11 +24,12 @@ The first successful snapshot for each source is a baseline and sends no mass al
 
 - Cloudflare D1 stores snapshots, atomic alert claims/deduplication, health, and daily email counters.
 - Rental Store API, all-reservations watch, and website backup share one alert namespace, preventing duplicate emails for the same reservation and price fingerprint.
+- DVC-Rental direct and browser paths share one snapshot and alert namespace, so the browser fallback does not create duplicate alerts for the same reservation fingerprint.
 - Alert claims expire if a Worker crashes before email delivery, so the event can retry later.
 - A source failure or zero-result parser failure does not replace a good snapshot.
 - Snapshots advance only after alerts are successfully delivered or there is nothing new to deliver.
 - Three consecutive source failures trigger a warning email.
-- The status page shows source last-check/last-success timestamps, failure counts, and email usage.
+- The status page shows source last-check/last-success timestamps, failure counts, email usage, and last added/changed activity for each watch.
 - With Gmail plus the Pushover email gateway, each alert consumes two Brevo recipient deliveries. The monitor warns at 110 alert emails/day, pauses low-priority emails at 125, and preserves bargain-alert capacity until a hard safety cutoff of 145 alert emails/day, keeping the theoretical maximum below 300 recipient deliveries/day.
 
 ## Storage
@@ -63,9 +66,9 @@ The deploy token must be able to create/manage the D1 database and create/deploy
 1. Add the required repository secrets.
 2. Run **Actions → Deploy DVC monitor → Run workflow**.
 3. Copy the printed `DVC_MONITOR_BASE_URL` into the repository secret of the same name.
-4. Run the two browser workflows manually once to establish baselines.
+4. Run the browser workflows manually once to establish baselines.
 5. Open the Worker URL to confirm health.
-6. Keep ChangeDetection enabled for 48 hours while comparing alerts and actual usage.
+6. Keep ChangeDetection enabled while comparing alerts until the replacement monitor has demonstrated stable operation.
 
 ## Manual checks
 
@@ -73,6 +76,8 @@ Protected Worker endpoint examples:
 
 - `POST /run?mode=rental-store` — Rental Store API + all-reservations cycle
 - `POST /run?mode=slow` — David's + DVC Shop
+- `POST /run?mode=dvc-rental-direct` — direct structured DVC-Rental check
+- `POST /run?mode=rare-finds` — DVCReservations Rare Finds check
 - `POST /run?mode=website-backup-dispatch` — request Rental Store browser backup
 - `POST /run?mode=test-email` — send one test email
 
