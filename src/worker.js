@@ -1,3 +1,4 @@
+import { boundedFetch } from "./bounded-fetch.js";
 import baseWorker from "./index.js";
 import { URLS } from "./config.js";
 import { parseDvcRentalDealsHtml } from "./dvc-rental-direct.js";
@@ -70,7 +71,7 @@ export default {
 async function runDvcRentalDirect(env, now) {
   const store = new Storage(env.DB);
   try {
-    const response = await fetch(URLS.dvcRental, {
+    const response = await boundedFetch(URLS.dvcRental, {
       headers: {
         Accept: "text/html,application/xhtml+xml",
         "User-Agent": "Mozilla/5.0 (compatible; DVC-Monitor/2.0)",
@@ -137,7 +138,7 @@ async function dispatchDvcRentalBrowser(env, now) {
   try {
     if (!env.GITHUB_DISPATCH_TOKEN) throw new Error("GITHUB_DISPATCH_TOKEN not configured");
 
-    const response = await fetch(
+    const response = await boundedFetch(
       `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${DVC_RENTAL_WORKFLOW}/dispatches`,
       {
         method: "POST",
