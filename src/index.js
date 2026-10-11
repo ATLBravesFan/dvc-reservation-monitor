@@ -424,7 +424,9 @@ async function drainOutbox(env, store, limit = 20) {
         await maybeSendEmailCapacityWarning(env,store,after);
       } catch (error) { console.error("post-send metadata failed",errorMessage(error)); }
     } catch (error) {
-      if (providerCalled) await markOutboxUncertain(env.DB,row.alert_key,errorMessage(error));
+      if (error?.providerRejected && (error.status === 429 || error.status >= 500)) {
+        await requeueOutbox(env.DB,row.alert_key,errorMessage(error),Math.min(3600,60*2**Math.min(row.attempts,5)));
+      } else if (providerCalled) await markOutboxUncertain(env.DB,row.alert_key,errorMessage(error));
       else await requeueOutbox(env.DB,row.alert_key,errorMessage(error));
       console.error("outbox delivery requires review",row.alert_key,errorMessage(error));
     }
@@ -503,7 +505,12 @@ async function sendBrevo(env, subject, htmlBody) {
     }),
   });
 
-  if (!response.ok) throw new Error(`Brevo ${response.status}: ${(await response.text()).slice(0, 250)}`);
+  if (!response.ok) {
+    const error = new Error(`Brevo ${response.status}: ${(await response.text()).slice(0, 250)}`);
+    error.providerRejected = true;
+    error.status = response.status;
+    throw error;
+  }
 }
 
 async function maybeSendEmailCapacityWarning(env, store, currentCount) {
