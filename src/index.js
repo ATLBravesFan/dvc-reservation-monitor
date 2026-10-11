@@ -371,7 +371,6 @@ async function processStandardWatch(env, store, key, watch, rows) {
 
 async function sendEvents(env, store, source, title, events, showMatches) {
   if (!events.length) return { sent: 0, deferred: false };
-  const priority = events.some(event => (event.matches || bargainMatches(event.listing)).length > 0);
   // Persist before advancing snapshots. Repeated source polls cannot create duplicate keys.
   for (const event of events) {
     const key = alertKey(source, event.listing);
@@ -407,8 +406,9 @@ async function drainOutbox(env, store, limit = 20) {
       await sendEmail(env,row.title || row.source,[event],Boolean(row.show_matches));
       // Brevo accepted the email; a D1 failure after this point is ambiguous.
       await markOutboxSent(env.DB,row.alert_key);
-      await store.markAlertSent(row.alert_key);
-      const after = await store.incrementEmailCount();
+      try { await store.markAlertSent(row.alert_key); } catch (error) { console.error("legacy alert ledger update failed",errorMessage(error)); }
+      let after;
+      try { after = await store.incrementEmailCount(); } catch (error) { console.error("email count update failed",errorMessage(error)); after = 0; }
       sent++;
       try {
         const watchKeys = row.source === "dvc-rental-store"
