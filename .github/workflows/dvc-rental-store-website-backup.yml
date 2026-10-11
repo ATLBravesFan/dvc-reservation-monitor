@@ -29,15 +29,15 @@ jobs:
           # path is backup redundancy, so avoid hammering the website from a
           # GitHub datacenter IP every minute. Scheduled runs are always allowed
           # as an independent fallback; Worker-dispatched runs scrape about every
-          # 3 minutes.
+          # 5 minutes.
           if [ "${{ github.event_name }}" = "schedule" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "Scheduled fallback: running browser backup."
           else
             minute=$((10#$(date -u +%M)))
-            if [ $((minute % 3)) -eq 0 ]; then
+            if [ $((minute % 5)) -eq 0 ]; then
               echo "run=true" >> "$GITHUB_OUTPUT"
-              echo "Three-minute browser cadence: running backup."
+              echo "Five-minute browser cadence: running backup."
             else
               echo "run=false" >> "$GITHUB_OUTPUT"
               echo "Primary API is still checking every minute; skipping this redundant browser dispatch."
