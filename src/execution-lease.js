@@ -20,7 +20,12 @@ export async function withLease(db,source,fn,ttlSeconds=90){
   const token=await acquireLease(db,source,ttlSeconds);
   if(!token)return {skipped:true,reason:"already-running"};
   const id=crypto.randomUUID(),started=new Date().toISOString();
-  await db.prepare("INSERT INTO execution_history(id,source,started_at,outcome) VALUES(?,?,?,'running')").bind(id,source,started).run();
+  try {
+    await db.prepare("INSERT INTO execution_history(id,source,started_at,outcome) VALUES(?,?,?,'running')").bind(id,source,started).run();
+  } catch (error) {
+    await releaseLease(db,source,token);
+    throw error;
+  }
   try{
     const value=await fn();
     await db.prepare("UPDATE execution_history SET finished_at=?,outcome='success' WHERE id=?").bind(new Date().toISOString(),id).run();
