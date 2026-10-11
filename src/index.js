@@ -60,12 +60,12 @@ async function runScheduled(env, now) {
   // email must never prevent the other watches from reaching their time slots.
   const jobs = [
     ["rentalStore", async () => tracked(env, store, "rental-store-api", () => pollRentalStore(env, store, tenMinuteCycle))],
+    ["dvcShop", () => pollDvcShop(env, store)],
   ];
   if (fiveMinuteCycle) {
     jobs.push(["rentalStoreWebsiteDispatch", async () => tracked(env, store, "rental-store-website-dispatch", () => dispatchRentalStoreWebsiteBackup(env))]);
     jobs.push(["davids", () => pollDavids(env, store)]);
   }
-  if (tenMinuteCycle) jobs.push(["dvcShop", () => pollDvcShop(env, store)]);
 
   const settled = await Promise.allSettled(jobs.map(async ([name, run]) => [name, await run()]));
   const result = {};
@@ -474,6 +474,7 @@ async function maybeSendEmailCapacityWarning(env, store, currentCount) {
   try {
     await sendBrevo(
       env,
+      store,
       "DVC Monitor email-capacity warning",
       `<p>The monitor has sent ${currentCount} emails today. Low-priority alerts pause at ${EMAIL_LIMITS.lowPriorityCutoff}; bargain alerts remain enabled until the ${EMAIL_LIMITS.hardSafetyCutoff} safety cutoff.</p>`,
     );
