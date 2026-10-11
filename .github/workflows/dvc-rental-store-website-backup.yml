@@ -2,9 +2,8 @@ name: DVC Rental Store website backup
 
 on:
   schedule:
-    # Independent fallback if Worker dispatches ever stop. Offset from the
-    # normal dispatch cadence so it is less likely to collide with a live run.
-    - cron: "2,17,32,47 * * * *"
+    # Independent five-minute fallback. GitHub scheduled starts may be delayed.
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -21,43 +20,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
-      - name: Decide whether this dispatch should scrape
-        id: cadence
-        shell: bash
-        run: |
-          # The primary Rental Store API still checks every minute. This browser
-          # path is backup redundancy, so avoid hammering the website from a
-          # GitHub datacenter IP every minute. Scheduled runs are always allowed
-          # as an independent fallback; Worker-dispatched runs scrape about every
-          # 5 minutes.
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "Scheduled fallback: running browser backup."
-          else
-            minute=$((10#$(date -u +%M)))
-            if [ $((minute % 5)) -eq 0 ]; then
-              echo "run=true" >> "$GITHUB_OUTPUT"
-              echo "Five-minute browser cadence: running backup."
-            else
-              echo "run=false" >> "$GITHUB_OUTPUT"
-              echo "Primary API is still checking every minute; skipping this redundant browser dispatch."
-            fi
-          fi
-
       - uses: actions/checkout@v4
-        if: steps.cadence.outputs.run == 'true'
 
       - uses: actions/setup-node@v4
-        if: steps.cadence.outputs.run == 'true'
         with:
           node-version: "22"
 
       - name: Install browser dependency
-        if: steps.cadence.outputs.run == 'true'
         run: npm install --omit=dev --no-audit --no-fund
 
       - name: Scrape DVC Rental Store website
-        if: steps.cadence.outputs.run == 'true'
         env:
           DVC_MONITOR_BASE_URL: ${{ secrets.DVC_MONITOR_BASE_URL }}
           DVC_MONITOR_INGEST_TOKEN: ${{ secrets.DVC_MONITOR_INGEST_TOKEN }}
