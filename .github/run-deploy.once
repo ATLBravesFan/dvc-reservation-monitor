@@ -1,1 +1,1 @@
-Deploy DVC Shop direct HTTP monitoring every minute. Keep DVC-Rental direct primary at five minutes with its ten-minute browser fallback while stability data accumulates.
+Deploy dual Gmail alert delivery: send each DVC alert to the notification-only Gmail account and copy the primary Gmail address, while retaining Pushover as a backup and keeping the one-minute DVC Shop cadence.
