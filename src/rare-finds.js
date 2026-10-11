@@ -178,6 +178,7 @@ async function sendRareEvents(env, store, events) {
     await sendBrevo(env, subject, `<h2>DVCReservations Rare Finds</h2>${blocks}`);
     for (const event of claimed) await store.markAlertSent(event.alertKey);
     const after = await store.incrementEmailCount();
+    try { await store.recordWatchEvents(["rareFinds"], claimed); } catch { /* email already delivered */ }
     await maybeCapacityWarning(env, store, after);
     return { sent: claimed.length, deferred: false };
   } catch (error) {
