@@ -24,9 +24,13 @@ jobs:
         env:
           CHROME_PATH: /usr/bin/google-chrome
         run: node scripts/api-investigation.mjs | tee api-investigation-report.txt
+      - name: Compare DVC-Rental raw HTTP response
+        run: node scripts/dvc-rental-raw-probe.mjs | tee -a api-investigation-report.txt
       - name: Upload investigation report
         uses: actions/upload-artifact@v4
         with:
           name: api-investigation-report
-          path: api-investigation-report.txt
+          path: |
+            api-investigation-report.txt
+            dvc-rental-raw.html
           if-no-files-found: error
