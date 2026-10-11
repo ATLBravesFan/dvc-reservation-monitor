@@ -1,1 +1,1 @@
-Deploy direct DVC-Rental structured-data primary checks every five minutes while keeping the existing browser workflow as a ten-minute fallback. Parser and live-inventory verification passed before deployment.
+Deploy DVC Shop direct HTTP monitoring every minute. Keep DVC-Rental direct primary at five minutes with its ten-minute browser fallback while stability data accumulates.
