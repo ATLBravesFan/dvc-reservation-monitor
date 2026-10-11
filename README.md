@@ -20,6 +20,10 @@ Any monitored source that exposes enough price data is also checked for the prio
 
 The first successful snapshot for each source is a baseline and sends no mass alert. Removals do not alert. Direct booking links are included whenever available.
 
+## Alert delivery
+
+Production alerts go to the notification-only Gmail account in `EMAIL_TO` and, when `EMAIL_FROM` is a different address, a copy is also delivered to that primary Gmail inbox. This allows Gmail push notifications to be enabled only for the notification account while still keeping every DVC alert in the primary mailbox. Pushover can remain enabled as a BCC backup.
+
 ## Reliability protections
 
 - Cloudflare D1 stores snapshots, atomic alert claims/deduplication, health, and daily email counters.
@@ -30,7 +34,7 @@ The first successful snapshot for each source is a baseline and sends no mass al
 - Snapshots advance only after alerts are successfully delivered or there is nothing new to deliver.
 - Three consecutive source failures trigger a warning email.
 - The status page shows source last-check/last-success timestamps, failure counts, email usage, and last added/changed activity for each watch.
-- With Gmail plus the Pushover email gateway, each alert consumes two Brevo recipient deliveries. The monitor warns at 110 alert emails/day, pauses low-priority emails at 125, and preserves bargain-alert capacity until a hard safety cutoff of 145 alert emails/day, keeping the theoretical maximum below 300 recipient deliveries/day.
+- With notification Gmail + primary Gmail + the Pushover email gateway, each alert can consume three Brevo recipient deliveries. The monitor warns at 70 alert emails/day, pauses low-priority emails at 82, and preserves bargain-alert capacity until a hard safety cutoff of 96 alert emails/day, keeping the theoretical maximum below 300 recipient deliveries/day.
 
 ## Storage
 
