@@ -380,9 +380,8 @@ async function sendEvents(env, store, source, title, events, showMatches) {
     await enqueueOutbox(env.DB, { key, source, listingId: event.listing.id, event,
       title, showMatches, priority: (event.matches || bargainMatches(event.listing)).length > 0 });
   }
-  // Sending is independent of source snapshot updates. The scheduled drain retries pending work.
-  const result = await drainOutbox(env, store, 20);
-  return { sent: result.sent, deferred: false };
+  // The scheduled delivery worker runs separately, so Brevo latency cannot delay source checks.
+  return { sent: 0, queued: events.length, deferred: false };
 }
 
 async function drainOutbox(env, store, limit = 20) {
@@ -394,8 +393,8 @@ async function drainOutbox(env, store, limit = 20) {
   let sent = 0;
   for (const row of rows) {
     const count = await store.getEmailCount();
-    if (count >= EMAIL_LIMITS.hardSafetyCutoff ||
-        (!row.priority && count >= EMAIL_LIMITS.lowPriorityCutoff)) break;
+    if (count >= EMAIL_LIMITS.hardSafetyCutoff) break;
+    if (!row.priority && count >= EMAIL_LIMITS.lowPriorityCutoff) continue;
     if (!await claimOutbox(env.DB,row.alert_key)) continue;
     const event = JSON.parse(row.payload);
     let providerCalled = false;
