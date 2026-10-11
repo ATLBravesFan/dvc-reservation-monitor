@@ -1,1 +1,1 @@
-Trigger production deployment of latest main, including rental-store-website freshness threshold 8 minutes. Preserve existing watches and secrets.
+Deploy parallel DVC source scheduler, five-minute website dispatch, and fifteen-minute independent GitHub fallback. Preserve D1, credentials, filters, and NFHS.
