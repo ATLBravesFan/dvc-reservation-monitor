@@ -1,1 +1,1 @@
-Deploy dual Gmail alert delivery: send each DVC alert to the notification-only Gmail account and copy the primary Gmail address, while retaining Pushover as a backup and keeping the one-minute DVC Shop cadence.
+Deploy weekend bargain alert emphasis: when a bargain reservation includes a Friday, Saturday, or Sunday date, keep the existing flame subject and wrap it with ‼️ markers. Preserve dual-Gmail delivery, Pushover backup, D1 deduplication, and existing monitor schedules.
