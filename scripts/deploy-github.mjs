@@ -30,6 +30,29 @@ if (config.name !== "dvc-reservation-monitor") throw new Error("Unexpected Worke
 const workerMain = join(repoRoot, config.main);
 config.main = workerMain;
 
+// Bargain alerts that include any Friday, Saturday, or Sunday date in the
+// displayed reservation range receive extra exclamation emphasis around the
+// existing flame subject. The check intentionally includes the checkout date,
+// matching the date range the user sees in the reservation alert.
+const weekendHelper = [
+  "function reservationIncludesWeekend(listing) {",
+  "  const start = Date.parse(String(listing?.checkIn || \"\") + \"T00:00:00Z\");",
+  "  const end = Date.parse(String(listing?.checkOut || \"\") + \"T00:00:00Z\");",
+  "  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return false;",
+  "  for (let time = start; time <= end; time += 86400000) {",
+  "    const day = new Date(time).getUTCDay();",
+  "    if (day === 0 || day === 5 || day === 6) return true;",
+  "  }",
+  "  return false;",
+  "}",
+  "",
+  "function decorateWeekendBargainSubject(subject, events, isBargain) {",
+  "  if (!isBargain || !events.some(event => reservationIncludesWeekend(event.listing))) return subject;",
+  "  return `‼️ ${subject} ‼️`;",
+  "}",
+  "",
+].join("\n");
+
 // EMAIL_TO is the notification-only Gmail account. EMAIL_FROM is the primary
 // Gmail address already used by the monitor as its sender identity. During
 // deployment, add the primary address as a CC whenever the two addresses differ,
@@ -39,21 +62,57 @@ config.main = workerMain;
 {
   const notificationModule = join(repoRoot, "src", "index.js");
   const original = readFileSync(notificationModule, "utf8");
-  const needle = "      to: [{ email: env.EMAIL_TO }],";
-  const replacement = `${needle}\n      ...(env.EMAIL_FROM && env.EMAIL_FROM.trim().toLowerCase() !== env.EMAIL_TO.trim().toLowerCase() ? { cc: [{ email: env.EMAIL_FROM.trim() }] } : {}),\n      ...(env.PUSHOVER_EMAIL ? { bcc: [{ email: env.PUSHOVER_EMAIL }] } : {}),`;
-  if (!original.includes(needle)) throw new Error("Could not locate standard Brevo recipient block for dual-Gmail routing");
-  writeFileSync(notificationModule, original.replace(needle, replacement));
+  const helperNeedle = "function alertKey(source, listing) {";
+  const subjectNeedle = '  const subject = priorityBargainSubject(title, events, subjectBits) || `${title} — ${subjectBits.join(", ")}`;';
+  const subjectReplacement = [
+    "  const prioritySubject = priorityBargainSubject(title, events, subjectBits);",
+    "  const subject = decorateWeekendBargainSubject(",
+    '    prioritySubject || `${title} — ${subjectBits.join(", ")}`,',
+    "    events,",
+    "    Boolean(prioritySubject),",
+    "  );",
+  ].join("\n");
+  const recipientNeedle = "      to: [{ email: env.EMAIL_TO }],";
+  const recipientReplacement = `${recipientNeedle}\n      ...(env.EMAIL_FROM && env.EMAIL_FROM.trim().toLowerCase() !== env.EMAIL_TO.trim().toLowerCase() ? { cc: [{ email: env.EMAIL_FROM.trim() }] } : {}),\n      ...(env.PUSHOVER_EMAIL ? { bcc: [{ email: env.PUSHOVER_EMAIL }] } : {}),`;
+
+  if (!original.includes(helperNeedle)) throw new Error("Could not locate standard alert helper insertion point");
+  if (!original.includes(subjectNeedle)) throw new Error("Could not locate standard bargain subject line");
+  if (!original.includes(recipientNeedle)) throw new Error("Could not locate standard Brevo recipient block for dual-Gmail routing");
+
+  const modified = original
+    .replace(helperNeedle, `${weekendHelper}${helperNeedle}`)
+    .replace(subjectNeedle, subjectReplacement)
+    .replace(recipientNeedle, recipientReplacement);
+  writeFileSync(notificationModule, modified);
 }
 
 // Rare Finds has its own mail helper and already contains the Pushover BCC.
-// Add the same primary-Gmail copy there as well.
+// Apply the same weekend-bargain subject emphasis and primary-Gmail copy there.
 {
   const rareFindsModule = join(repoRoot, "src", "rare-finds.js");
   const original = readFileSync(rareFindsModule, "utf8");
-  const needle = "      to: [{ email: env.EMAIL_TO }],";
-  const replacement = `${needle}\n      ...(env.EMAIL_FROM && env.EMAIL_FROM.trim().toLowerCase() !== env.EMAIL_TO.trim().toLowerCase() ? { cc: [{ email: env.EMAIL_FROM.trim() }] } : {}),`;
-  if (!original.includes(needle)) throw new Error("Could not locate Rare Finds Brevo recipient block for dual-Gmail routing");
-  writeFileSync(rareFindsModule, original.replace(needle, replacement));
+  const helperNeedle = "function bargainSubject(events, bits) {";
+  const subjectNeedle = '    const subject = bargainSubject(claimed, bits) || `DVCReservations Rare Finds — ${bits.join(", ")}`;';
+  const subjectReplacement = [
+    "    const prioritySubject = bargainSubject(claimed, bits);",
+    "    const subject = decorateWeekendBargainSubject(",
+    '      prioritySubject || `DVCReservations Rare Finds — ${bits.join(", ")}`,',
+    "      claimed,",
+    "      Boolean(prioritySubject),",
+    "    );",
+  ].join("\n");
+  const recipientNeedle = "      to: [{ email: env.EMAIL_TO }],";
+  const recipientReplacement = `${recipientNeedle}\n      ...(env.EMAIL_FROM && env.EMAIL_FROM.trim().toLowerCase() !== env.EMAIL_TO.trim().toLowerCase() ? { cc: [{ email: env.EMAIL_FROM.trim() }] } : {}),`;
+
+  if (!original.includes(helperNeedle)) throw new Error("Could not locate Rare Finds bargain helper insertion point");
+  if (!original.includes(subjectNeedle)) throw new Error("Could not locate Rare Finds bargain subject line");
+  if (!original.includes(recipientNeedle)) throw new Error("Could not locate Rare Finds Brevo recipient block for dual-Gmail routing");
+
+  const modified = original
+    .replace(helperNeedle, `${weekendHelper}${helperNeedle}`)
+    .replace(subjectNeedle, subjectReplacement)
+    .replace(recipientNeedle, recipientReplacement);
+  writeFileSync(rareFindsModule, modified);
 }
 
 const apiRoot = `https://api.cloudflare.com/client/v4/accounts/${account}`;
@@ -134,6 +193,11 @@ function run(command, args, options = {}) {
   return result;
 }
 
+// Validate the generated production source after all deploy-time notification
+// routing and weekend-bargain transformations have been applied.
+run("node", ["--check", "src/index.js"]);
+run("node", ["--check", "src/rare-finds.js"]);
+
 try {
   run("npx", ["--no-install", "wrangler", "d1", "migrations", "apply", "DB", "--remote", "--config", tempConfig]);
   const deploy = run("npx", ["--no-install", "wrangler", "deploy", "--config", tempConfig, "--secrets-file", secretsPath]);
@@ -143,6 +207,7 @@ try {
   if (url) console.log(`DVC_MONITOR_BASE_URL=${url}`);
   console.log(`Primary Gmail copy: ${process.env.EMAIL_FROM?.trim() && process.env.EMAIL_FROM.trim().toLowerCase() !== process.env.EMAIL_TO.trim().toLowerCase() ? "enabled" : "same as notification inbox"}`);
   console.log(`Pushover e-mail gateway: ${process.env.PUSHOVER_EMAIL?.trim() ? "enabled" : "not configured"}`);
+  console.log("Weekend bargain subject emphasis: enabled for Friday/Saturday/Sunday date ranges");
   console.log("Deployment complete. Keep ChangeDetection enabled until the 48-hour parallel verification is complete.");
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
