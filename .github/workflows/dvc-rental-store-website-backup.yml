@@ -2,8 +2,9 @@ name: DVC Rental Store website backup
 
 on:
   schedule:
-    # Independent five-minute fallback. GitHub scheduled starts may be delayed.
-    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
+    # Independent recovery every 15 minutes if Worker dispatches stop.
+    # The Worker normally dispatches this browser job every five minutes.
+    - cron: "2,17,32,47 * * * *"
   workflow_dispatch:
 
 permissions:
