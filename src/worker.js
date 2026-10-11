@@ -34,6 +34,12 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if (url.pathname === "/run" && request.method === "POST" && url.searchParams.get("mode") === "dvc-rental-dispatch") {
+      if (!env.ADMIN_TOKEN || (request.headers.get("authorization") || "") !== `Bearer ${env.ADMIN_TOKEN}`) return new Response("Unauthorized", { status: 401 });
+      const result = await dispatchDvcRentalBrowser(env, new Date());
+      return new Response(JSON.stringify(result), { headers: { "content-type": "application/json" } });
+    }
+
     if (url.pathname === "/run" && request.method === "POST" && url.searchParams.get("mode") === "dvc-rental-direct") {
       if (!env.ADMIN_TOKEN || (request.headers.get("authorization") || "") !== `Bearer ${env.ADMIN_TOKEN}`) {
         return new Response("Unauthorized", { status: 401 });
