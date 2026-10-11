@@ -2,6 +2,9 @@ import { boundedFetch } from "./bounded-fetch.js";
 import { URLS, WATCHES, EMAIL_LIMITS, SOURCE_EXPECTED_MINUTES } from "./config.js";
 import { parseKeyholder, parseExternalRentalStore, parseDavids, parseDvcShop, fingerprint, formatListing, priceSummary, byId } from "./parsers.js";
 import { Storage, utcDay } from "./storage.js";
+import { withLease } from "./execution-lease.js";
+import { assertInventoryHealthy } from "./inventory-guard.js";
+import { enqueueOutbox, claimOutbox, markOutboxSent, markOutboxUncertain, requeueOutbox, quarantineExpiredSends } from "./alert-outbox.js";
 
 const RENTAL_STORE_BACKUP_WORKFLOW = "dvc-rental-store-website-backup.yml";
 const GITHUB_REPO = "ATLBravesFan/dvc-reservation-monitor";
@@ -33,7 +36,7 @@ export default {
       const parsed = parseExternalRentalStore(rows);
       if (!parsed.length) return json({ ok: false, error: "No usable Rental Store website reservations" }, 400);
       const result = await tracked(env, store, "rental-store-website", () => processRentalStoreWebsite(env, store, parsed));
-      return json({ ok: true, ...result });
+      return json(result?.skipped ? { ok: false, ...result } : { ok: true, ...result }, result?.skipped ? 409 : 200);
     }
 
     if (url.pathname === "/ingest/dvc-rental" && request.method === "POST") {
@@ -44,7 +47,7 @@ export default {
       const normalized = normalizeBrowserRows(rows, "DVC-Rental");
       if (!normalized.length) return json({ ok: false, error: "No usable DVC-Rental reservations" }, 400);
       const result = await tracked(env, store, "dvc-rental", () => processStandardWatch(env, store, "dvc-rental", WATCHES.dvcRental, normalized));
-      return json({ ok: true, ...result });
+      return json(result?.skipped ? { ok: false, ...result } : { ok: true, ...result }, result?.skipped ? 409 : 200);
     }
 
     return new Response("DVC monitor is running. Open / for status.");
@@ -60,6 +63,7 @@ function runScheduled(env, now, ctx) {
   // Crucial: register each watch independently. Never make a scheduled
   // invocation wait for all sources or for a shared D1 heartbeat.
   // An indefinitely stalled watch cannot hold other checks hostage.
+  ctx.waitUntil(drainOutbox(env, store, 20).catch(error => console.error("outbox drain failed",errorMessage(error))));
   const jobs = [
     ["rentalStore", () => tracked(env, store, "rental-store-api", () => pollRentalStore(env, store, tenMinuteCycle))],
     ["dvcShop", () => pollDvcShop(env, store)],
@@ -107,6 +111,7 @@ async function runManual(env, store, mode) {
   if (mode === "slow") return { slower: await pollSlowerHttpSources(env, store) };
   if (mode === "dvc-shop") return { dvcShop: await pollDvcShop(env, store) };
   if (mode === "davids") return { davids: await pollDavids(env, store) };
+  if (mode === "drain-outbox") return { outbox: await drainOutbox(env,store,20) };
   if (mode === "test-email") {
     await sendSystemEmail(env, store, "DVC Monitor test email", "The DVC monitor email connection is working.");
     return { testEmail: { ok: true } };
@@ -119,6 +124,7 @@ async function runManual(env, store, mode) {
 }
 
 async function tracked(env, store, source, fn) {
+  return withLease(env.DB, source, async () => {
   try {
     const value = await fn();
     await store.recordHealth(source, true, summarizeForHealth(value), null);
@@ -140,6 +146,7 @@ async function tracked(env, store, source, fn) {
     }
     throw error;
   }
+  });
 }
 
 async function dispatchRentalStoreWebsiteBackup(env) {
@@ -202,6 +209,7 @@ function validateRentalStoreRows(rows) {
 async function processRentalStoreFast(env, store, rows) {
   const key = "rental-store-fast";
   const previous = await store.getSnapshot(key);
+  assertInventoryHealthy(previous, rows, key);
   const current = byId(rows);
 
   if (!previous) {
@@ -226,6 +234,7 @@ async function processRentalStoreFast(env, store, rows) {
 async function processRentalStoreAllWatch(env, store, rows) {
   const key = "rental-store-all";
   const previous = await store.getSnapshot(key);
+  assertInventoryHealthy(previous, rows, key);
   const current = byId(rows);
 
   if (!previous) {
@@ -258,6 +267,7 @@ function bargainMatches(listing) {
 async function processRentalStoreWebsite(env, store, rows) {
   const key = "rental-store-website";
   const previous = await store.getSnapshot(key);
+  assertInventoryHealthy(previous, rows, key);
   const current = byId(rows);
   const qualifying = rows.filter(r => bargainMatches(r).length > 0);
 
@@ -328,6 +338,7 @@ async function pollSlowerHttpSources(env, store) {
 
 async function processStandardWatch(env, store, key, watch, rows) {
   const previous = await store.getSnapshot(key);
+  assertInventoryHealthy(previous, rows, key);
   const current = byId(rows);
 
   if (!previous) {
@@ -360,50 +371,87 @@ async function processStandardWatch(env, store, key, watch, rows) {
 
 async function sendEvents(env, store, source, title, events, showMatches) {
   if (!events.length) return { sent: 0, deferred: false };
-
-  const priority = events.some(event => (event.matches || bargainMatches(event.listing)).length > 0);
-  const count = await store.getEmailCount();
-
-  if (count >= EMAIL_LIMITS.hardSafetyCutoff || (!priority && count >= EMAIL_LIMITS.lowPriorityCutoff)) {
-    return { sent: 0, deferred: true };
-  }
-
-  const claimed = [];
+  // Persist before advancing snapshots. Repeated source polls cannot create duplicate keys.
   for (const event of events) {
     const key = alertKey(source, event.listing);
-    if (await store.claimAlert(key, source, String(event.listing.id), fingerprint(event.listing))) {
-      claimed.push({ ...event, alertKey: key });
-    }
+    const existing = await env.DB.prepare("SELECT status FROM alerts WHERE alert_key=?").bind(key).first();
+    if (existing?.status === "sent") continue;
+    await enqueueOutbox(env.DB, { key, source, listingId: event.listing.id, event,
+      title, showMatches, priority: (event.matches || bargainMatches(event.listing)).length > 0 });
   }
-  if (!claimed.length) return { sent: 0, deferred: false };
+  // The scheduled delivery worker runs separately, so Brevo latency cannot delay source checks.
+  return { sent: 0, queued: events.length, deferred: false };
+}
 
-  try {
-    await sendEmail(env, title, claimed, showMatches);
-    for (const event of claimed) await store.markAlertSent(event.alertKey);
-    const after = await store.incrementEmailCount();
-    // Record only successfully delivered reservation events, never unchanged polls.
-    const watchEvents = new Map();
-    const add = (key, event) => watchEvents.set(key, [...(watchEvents.get(key) || []), event]);
-    for (const event of claimed) {
-      if (source === "dvc-rental-store") {
-        add("rentalStoreAll", event);
-        if (WATCHES.rentalStoreNightly.match(event.listing)) add("rentalStoreNightly", event);
-        if (WATCHES.rentalStorePoints.match(event.listing)) add("rentalStorePoints", event);
-      } else {
-        add(source === "dvc-rental" ? "dvcRental" : source === "dvc-shop" ? "dvcShop" : source, event);
+async function drainOutbox(env, store, limit = 20) {
+  return withLease(env.DB, 'alert-outbox-drain', async () => {
+  await quarantineExpiredSends(env.DB);
+  const rows = (await env.DB.prepare(`SELECT * FROM alert_outbox WHERE status='pending'
+    AND (next_attempt_at IS NULL OR next_attempt_at<=?)
+    ORDER BY priority DESC,created_at ASC LIMIT ?`)
+    .bind(new Date().toISOString(),limit).all()).results || [];
+  let sent = 0;
+  const groups = new Map();
+  for (const row of rows) {
+    const key = JSON.stringify([row.source,row.title,row.show_matches,row.priority]);
+    if (!groups.has(key)) groups.set(key,[]);
+    groups.get(key).push(row);
+  }
+  for (const candidates of groups.values()) {
+    const count = await store.getEmailCount();
+    if (count >= EMAIL_LIMITS.hardSafetyCutoff) break;
+    if (!candidates[0].priority && count >= EMAIL_LIMITS.lowPriorityCutoff) continue;
+    const claimed = [];
+    for (const row of candidates) {
+      if (await claimOutbox(env.DB,row.alert_key)) claimed.push(row);
+    }
+    if (!claimed.length) continue;
+    const valid = [];
+    for (const row of claimed) {
+      try { valid.push({row,event:JSON.parse(row.payload)}); }
+      catch (error) {
+        await markOutboxUncertain(env.DB,row.alert_key,"Invalid stored alert payload: "+errorMessage(error));
       }
     }
-    for (const [watchKey, watchItems] of watchEvents) {
-      try { await store.recordWatchEvents([watchKey], watchItems); } catch { /* email was already delivered */ }
+    if (!valid.length) continue;
+    let providerCalled = false;
+    try {
+      if (!env.BREVO_API_KEY || !env.EMAIL_TO || !env.EMAIL_FROM) {
+        for (const {row} of valid) await requeueOutbox(env.DB,row.alert_key,"Email configuration missing",300);
+        continue;
+      }
+      providerCalled = true;
+      await sendEmail(env,valid[0].row.title || valid[0].row.source,valid.map(x=>x.event),Boolean(valid[0].row.show_matches));
+      // One Brevo email may contain many reservations. All claims share its delivery outcome.
+      for (const {row} of valid) {
+        await markOutboxSent(env.DB,row.alert_key);
+        try { await store.markAlertSent(row.alert_key); } catch (error) { console.error("legacy alert ledger update failed",errorMessage(error)); }
+      }
+      let after;
+      try { after = await store.incrementEmailCount(); } catch (error) { console.error("email count update failed",errorMessage(error)); after = 0; }
+      sent++;
+      try {
+        for (const {row,event} of valid) {
+          const watchKeys = row.source === "dvc-rental-store"
+            ? ["rentalStoreAll",...(WATCHES.rentalStoreNightly.match(event.listing)?["rentalStoreNightly"]:[]),
+               ...(WATCHES.rentalStorePoints.match(event.listing)?["rentalStorePoints"]:[])]
+            : [row.source === "dvc-rental"?"dvcRental":row.source === "dvc-shop"?"dvcShop":row.source];
+          await store.recordWatchEvents(watchKeys,[event]);
+        }
+        await maybeSendEmailCapacityWarning(env,store,after);
+      } catch (error) { console.error("post-send metadata failed",errorMessage(error)); }
+    } catch (error) {
+      for (const {row} of valid) {
+        if (error?.providerRejected && (error.status === 429 || error.status >= 500)) {
+          await requeueOutbox(env.DB,row.alert_key,errorMessage(error),Math.min(3600,60*2**Math.min(row.attempts,5)));
+        } else if (providerCalled) await markOutboxUncertain(env.DB,row.alert_key,errorMessage(error));
+        else await requeueOutbox(env.DB,row.alert_key,errorMessage(error));
+      }
+      console.error("outbox delivery requires review",valid.length,errorMessage(error));
     }
-    await maybeSendEmailCapacityWarning(env, store, after);
-    return { sent: claimed.length, deferred: false };
-  } catch (error) {
-    for (const event of claimed) {
-      try { await store.releaseAlert(event.alertKey); } catch { /* retry claim will expire anyway */ }
-    }
-    throw error;
   }
+  return { sent, inspected: rows.length };
+  }, 120);
 }
 
 function alertKey(source, listing) {
@@ -477,7 +525,12 @@ async function sendBrevo(env, subject, htmlBody) {
     }),
   });
 
-  if (!response.ok) throw new Error(`Brevo ${response.status}: ${(await response.text()).slice(0, 250)}`);
+  if (!response.ok) {
+    const error = new Error(`Brevo ${response.status}: ${(await response.text()).slice(0, 250)}`);
+    error.providerRejected = true;
+    error.status = response.status;
+    throw error;
+  }
 }
 
 async function maybeSendEmailCapacityWarning(env, store, currentCount) {
@@ -506,12 +559,14 @@ async function statusResponse(env, store, html) {
     const stale = expected ? (!Number.isFinite(checkedAt) || now - checkedAt > expected * 60_000) : false;
     return { ...item, expectedMinutes: expected || null, stale };
   });
+  const outboxCounts = (await env.DB.prepare("SELECT status, COUNT(*) AS count FROM alert_outbox GROUP BY status").all()).results || [];
+  const outbox = Object.fromEntries(outboxCounts.map(item => [item.status, Number(item.count)]));
   const emailCount = await store.getEmailCount();
   const watchKeys = Object.keys(WATCHES);
   const watchActivity = await Promise.all(watchKeys.map(key => store.getMeta(`watch-events:${key}`)));
   const lastScheduled = await store.getMeta("last-scheduled");
   const lastScheduledStart = await store.getMeta("last-scheduled-start");
-  const degraded = healthWithStale.some(item => !item.ok || item.stale || item.consecutiveFailures >= 3);
+  const degraded = healthWithStale.some(item => !item.ok || item.stale || item.consecutiveFailures >= 3) || (outbox.uncertain || 0) > 0;
 
   const payload = {
     ok: !degraded,
@@ -531,6 +586,8 @@ async function statusResponse(env, store, html) {
       trigger: "Cloudflare Worker dispatches GitHub browser workflow",
       githubCronFallback: "15 minutes",
     },
+    alertOutbox: { pending: outbox.pending || 0, sending: outbox.sending || 0,
+      sent: outbox.sent || 0, uncertain: outbox.uncertain || 0 },
     emailUsageToday: {
       sent: emailCount,
       providerDailyLimit: EMAIL_LIMITS.providerDaily,

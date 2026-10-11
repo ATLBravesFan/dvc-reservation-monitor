@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import { assertInventoryHealthy } from "../src/inventory-guard.js";
+const row=(id)=>({id,checkIn:"2027-01-01",checkOut:"2027-01-03",total:300});
+const prior=Object.fromEntries(Array.from({length:100},(_,i)=>[String(i),row(String(i))]));
+assert.doesNotThrow(()=>assertInventoryHealthy(prior,Array.from({length:25},(_,i)=>row(String(i))),"test"));
+assert.throws(()=>assertInventoryHealthy(prior,Array.from({length:10},(_,i)=>row(String(i))),"test"),/collapse/);
+assert.throws(()=>assertInventoryHealthy(null,[row("a"),row("a")],"test"),/duplicate/);
+assert.throws(()=>assertInventoryHealthy(null,[{...row("a"),total:-5}],"test"),/invalid price/);
+assert.throws(()=>assertInventoryHealthy(null,[{...row("a"),checkOut:"2026-12-01"}],"test"),/invalid dates/);
+console.log("inventory guards passed");
