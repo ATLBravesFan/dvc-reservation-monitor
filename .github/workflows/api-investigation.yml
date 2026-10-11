@@ -1,0 +1,26 @@
+name: API investigation (read only)
+
+on:
+  push:
+    branches:
+      - api-investigation-20261011
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install browser dependency
+        run: npm install --omit=dev --no-audit --no-fund
+      - name: Inspect public endpoints and browser network traffic
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: node scripts/api-investigation.mjs
