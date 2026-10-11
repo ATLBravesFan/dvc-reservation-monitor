@@ -390,45 +390,63 @@ async function drainOutbox(env, store, limit = 20) {
     ORDER BY priority DESC,created_at ASC LIMIT ?`)
     .bind(new Date().toISOString(),limit).all()).results || [];
   let sent = 0;
+  const groups = new Map();
   for (const row of rows) {
+    const key = JSON.stringify([row.source,row.title,row.show_matches,row.priority]);
+    if (!groups.has(key)) groups.set(key,[]);
+    groups.get(key).push(row);
+  }
+  for (const candidates of groups.values()) {
     const count = await store.getEmailCount();
     if (count >= EMAIL_LIMITS.hardSafetyCutoff) break;
-    if (!row.priority && count >= EMAIL_LIMITS.lowPriorityCutoff) continue;
-    if (!await claimOutbox(env.DB,row.alert_key)) continue;
-    let event;
-    try { event = JSON.parse(row.payload); }
-    catch (error) {
-      await markOutboxUncertain(env.DB,row.alert_key,"Invalid stored alert payload: "+errorMessage(error));
-      continue;
+    if (!candidates[0].priority && count >= EMAIL_LIMITS.lowPriorityCutoff) continue;
+    const claimed = [];
+    for (const row of candidates) {
+      if (await claimOutbox(env.DB,row.alert_key)) claimed.push(row);
     }
+    if (!claimed.length) continue;
+    const valid = [];
+    for (const row of claimed) {
+      try { valid.push({row,event:JSON.parse(row.payload)}); }
+      catch (error) {
+        await markOutboxUncertain(env.DB,row.alert_key,"Invalid stored alert payload: "+errorMessage(error));
+      }
+    }
+    if (!valid.length) continue;
     let providerCalled = false;
     try {
       if (!env.BREVO_API_KEY || !env.EMAIL_TO || !env.EMAIL_FROM) {
-        await requeueOutbox(env.DB,row.alert_key,"Email configuration missing",300);
+        for (const {row} of valid) await requeueOutbox(env.DB,row.alert_key,"Email configuration missing",300);
         continue;
       }
       providerCalled = true;
-      await sendEmail(env,row.title || row.source,[event],Boolean(row.show_matches));
-      // Brevo accepted the email; a D1 failure after this point is ambiguous.
-      await markOutboxSent(env.DB,row.alert_key);
-      try { await store.markAlertSent(row.alert_key); } catch (error) { console.error("legacy alert ledger update failed",errorMessage(error)); }
+      await sendEmail(env,valid[0].row.title || valid[0].row.source,valid.map(x=>x.event),Boolean(valid[0].row.show_matches));
+      // One Brevo email may contain many reservations. All claims share its delivery outcome.
+      for (const {row} of valid) {
+        await markOutboxSent(env.DB,row.alert_key);
+        try { await store.markAlertSent(row.alert_key); } catch (error) { console.error("legacy alert ledger update failed",errorMessage(error)); }
+      }
       let after;
       try { after = await store.incrementEmailCount(); } catch (error) { console.error("email count update failed",errorMessage(error)); after = 0; }
       sent++;
       try {
-        const watchKeys = row.source === "dvc-rental-store"
-          ? ["rentalStoreAll",...(WATCHES.rentalStoreNightly.match(event.listing)?["rentalStoreNightly"]:[]),
-             ...(WATCHES.rentalStorePoints.match(event.listing)?["rentalStorePoints"]:[])]
-          : [row.source === "dvc-rental"?"dvcRental":row.source === "dvc-shop"?"dvcShop":row.source];
-        await store.recordWatchEvents(watchKeys,[event]);
+        for (const {row,event} of valid) {
+          const watchKeys = row.source === "dvc-rental-store"
+            ? ["rentalStoreAll",...(WATCHES.rentalStoreNightly.match(event.listing)?["rentalStoreNightly"]:[]),
+               ...(WATCHES.rentalStorePoints.match(event.listing)?["rentalStorePoints"]:[])]
+            : [row.source === "dvc-rental"?"dvcRental":row.source === "dvc-shop"?"dvcShop":row.source];
+          await store.recordWatchEvents(watchKeys,[event]);
+        }
         await maybeSendEmailCapacityWarning(env,store,after);
       } catch (error) { console.error("post-send metadata failed",errorMessage(error)); }
     } catch (error) {
-      if (error?.providerRejected && (error.status === 429 || error.status >= 500)) {
-        await requeueOutbox(env.DB,row.alert_key,errorMessage(error),Math.min(3600,60*2**Math.min(row.attempts,5)));
-      } else if (providerCalled) await markOutboxUncertain(env.DB,row.alert_key,errorMessage(error));
-      else await requeueOutbox(env.DB,row.alert_key,errorMessage(error));
-      console.error("outbox delivery requires review",row.alert_key,errorMessage(error));
+      for (const {row} of valid) {
+        if (error?.providerRejected && (error.status === 429 || error.status >= 500)) {
+          await requeueOutbox(env.DB,row.alert_key,errorMessage(error),Math.min(3600,60*2**Math.min(row.attempts,5)));
+        } else if (providerCalled) await markOutboxUncertain(env.DB,row.alert_key,errorMessage(error));
+        else await requeueOutbox(env.DB,row.alert_key,errorMessage(error));
+      }
+      console.error("outbox delivery requires review",valid.length,errorMessage(error));
     }
   }
   return { sent, inspected: rows.length };
