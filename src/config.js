@@ -96,7 +96,7 @@ export const EMAIL_LIMITS = {
 export const SOURCE_EXPECTED_MINUTES = {
   "rental-store-api": 2,
   "rental-store-all": 12,
-  "rental-store-website": 4,
+  "rental-store-website": 8,
   "rental-store-website-dispatch": 3,
   "davids": 8,
   "dvc-shop": 15,
