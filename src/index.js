@@ -52,40 +52,36 @@ export default {
 
 async function runScheduled(env, now) {
   const store = new Storage(env.DB);
-  const result = {};
   const minute = now.getUTCMinutes();
   const fiveMinuteCycle = minute % 5 === 0;
   const tenMinuteCycle = minute % 10 === 0;
 
-  try {
-    result.rentalStore = await tracked(env, store, "rental-store-api", () => pollRentalStore(env, store, tenMinuteCycle));
-  } catch (error) {
-    result.rentalStore = { ok: false, error: errorMessage(error) };
-  }
-
-  try {
-    result.rentalStoreWebsiteDispatch = await tracked(
-      env,
-      store,
-      "rental-store-website-dispatch",
-      () => dispatchRentalStoreWebsiteBackup(env),
-    );
-  } catch (error) {
-    result.rentalStoreWebsiteDispatch = { ok: false, error: errorMessage(error) };
-  }
-
+  // Run independent sources concurrently. A slow API, browser dispatch, or
+  // email must never prevent the other watches from reaching their time slots.
+  const jobs = [
+    ["rentalStore", async () => tracked(env, store, "rental-store-api", () => pollRentalStore(env, store, tenMinuteCycle))],
+  ];
   if (fiveMinuteCycle) {
-    result.davids = await pollDavids(env, store);
+    jobs.push(["rentalStoreWebsiteDispatch", async () => tracked(env, store, "rental-store-website-dispatch", () => dispatchRentalStoreWebsiteBackup(env))]);
+    jobs.push(["davids", () => pollDavids(env, store)]);
   }
+  if (tenMinuteCycle) jobs.push(["dvcShop", () => pollDvcShop(env, store)]);
 
-  if (tenMinuteCycle) {
-    result.dvcShop = await pollDvcShop(env, store);
+  const settled = await Promise.allSettled(jobs.map(async ([name, run]) => [name, await run()]));
+  const result = {};
+  for (let i = 0; i < settled.length; i++) {
+    const outcome = settled[i];
+    if (outcome.status === "fulfilled") {
+      const [name, value] = outcome.value;
+      result[name] = value;
+    } else {
+      result[jobs[i][0]] = { ok: false, error: errorMessage(outcome.reason) };
+    }
   }
 
   if (minute === 7) {
     try { await store.cleanupExpiredAlerts(); } catch { /* non-critical cleanup */ }
   }
-
   await store.putMeta("last-scheduled", { ...result, checkedAt: new Date().toISOString() });
   return result;
 }
