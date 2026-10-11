@@ -44,6 +44,12 @@ async function scrapeRentalStore(context) {
   const captured = [];
   const jsonUrls = new Set();
 
+  // JavaScript alert/confirm dialogs can block all page interaction in headless
+  // Chrome. Dismiss them automatically so they cannot stall the backup.
+  page.on("dialog", async dialog => {
+    try { await dialog.dismiss(); } catch { /* dialog may already be gone */ }
+  });
+
   page.on("response", async response => {
     try {
       const contentType = response.headers()["content-type"] || "";
@@ -64,14 +70,20 @@ async function scrapeRentalStore(context) {
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
     console.log(`Rental Store page ${url}: HTTP ${response?.status() ?? "unknown"}, title=${JSON.stringify(await page.title())}`);
     await page.waitForTimeout(5000);
+    await dismissRentalStorePopups(page);
 
     // Trigger lazy-loaded inventory and allow client-side requests to finish.
+    // Re-check for popups while scrolling because some marketing overlays are
+    // delayed or only appear after the visitor has interacted with the page.
     for (let i = 0; i < 6; i += 1) {
+      await dismissRentalStorePopups(page);
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
       await page.waitForTimeout(1200);
     }
+    await dismissRentalStorePopups(page);
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.waitForTimeout(1500);
+    await dismissRentalStorePopups(page);
 
     const rendered = await page.locator('a[href*="/guests/reservations/"]').evaluateAll(anchors => anchors.map(anchor => {
       const href = anchor.href;
@@ -104,6 +116,80 @@ async function scrapeRentalStore(context) {
 
   await page.close();
   return dedupe(captured.map(normalizeRentalStoreObject).filter(Boolean));
+}
+
+async function dismissRentalStorePopups(page) {
+  let dismissed = 0;
+
+  // Escape closes many modal libraries without having to know the vendor.
+  try { await page.keyboard.press("Escape"); } catch { /* page may be navigating */ }
+
+  // Target common close controls used by WordPress, Elementor, Bootstrap,
+  // HubSpot, Klaviyo and generic newsletter/cookie modal implementations.
+  const selectors = [
+    'button[aria-label*="close" i]',
+    '[role="button"][aria-label*="close" i]',
+    '.pum-close',
+    '.dialog-close-button',
+    '.elementor-popup-modal .dialog-close-button',
+    '.modal button.close',
+    '.modal .btn-close',
+    '[data-dismiss="modal"]',
+    '[data-bs-dismiss="modal"]',
+    '.fancybox-close-small',
+    '.newsletter-popup .close',
+    '.popup .close',
+    '.leadinModal-close',
+  ];
+
+  for (const selector of selectors) {
+    const matches = page.locator(selector);
+    const count = Math.min(await matches.count().catch(() => 0), 5);
+    for (let index = 0; index < count; index += 1) {
+      const control = matches.nth(index);
+      if (!(await control.isVisible().catch(() => false))) continue;
+      try {
+        await control.click({ timeout: 1200, force: true });
+        dismissed += 1;
+        await page.waitForTimeout(100);
+      } catch {
+        // Try the next close control; stale/detached popup buttons are normal.
+      }
+    }
+  }
+
+  // Some popups have no useful CSS class but do expose an accessible button
+  // label. Keep these labels intentionally conservative so we do not click a
+  // reservation or navigation action by mistake.
+  const buttonLabels = [
+    /^close$/i,
+    /^dismiss$/i,
+    /^no thanks?$/i,
+    /^not now$/i,
+    /^maybe later$/i,
+    /^continue without/i,
+    /^got it$/i,
+    /^accept(?: all)?$/i,
+  ];
+
+  for (const label of buttonLabels) {
+    const matches = page.getByRole("button", { name: label });
+    const count = Math.min(await matches.count().catch(() => 0), 3);
+    for (let index = 0; index < count; index += 1) {
+      const control = matches.nth(index);
+      if (!(await control.isVisible().catch(() => false))) continue;
+      try {
+        await control.click({ timeout: 1200, force: true });
+        dismissed += 1;
+        await page.waitForTimeout(100);
+      } catch {
+        // Ignore popup controls that disappear while we are trying to click.
+      }
+    }
+  }
+
+  if (dismissed) console.log(`Rental Store popup protection dismissed ${dismissed} visible overlay control(s)`);
+  return dismissed;
 }
 
 function collectReservationObjects(value, out, depth = 0) {
