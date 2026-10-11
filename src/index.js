@@ -34,7 +34,7 @@ export default {
       const parsed = parseExternalRentalStore(rows);
       if (!parsed.length) return json({ ok: false, error: "No usable Rental Store website reservations" }, 400);
       const result = await tracked(env, store, "rental-store-website", () => processRentalStoreWebsite(env, store, parsed));
-      return json({ ok: true, ...result });
+      return json(result?.skipped ? { ok: false, ...result } : { ok: true, ...result }, result?.skipped ? 409 : 200);
     }
 
     if (url.pathname === "/ingest/dvc-rental" && request.method === "POST") {
