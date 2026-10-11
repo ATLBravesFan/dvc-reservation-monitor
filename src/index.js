@@ -2,6 +2,7 @@ import { boundedFetch } from "./bounded-fetch.js";
 import { URLS, WATCHES, EMAIL_LIMITS, SOURCE_EXPECTED_MINUTES } from "./config.js";
 import { parseKeyholder, parseExternalRentalStore, parseDavids, parseDvcShop, fingerprint, formatListing, priceSummary, byId } from "./parsers.js";
 import { Storage, utcDay } from "./storage.js";
+import { withLease } from "./execution-lease.js";
 
 const RENTAL_STORE_BACKUP_WORKFLOW = "dvc-rental-store-website-backup.yml";
 const GITHUB_REPO = "ATLBravesFan/dvc-reservation-monitor";
@@ -119,6 +120,7 @@ async function runManual(env, store, mode) {
 }
 
 async function tracked(env, store, source, fn) {
+  return withLease(env.DB, source, async () => {
   try {
     const value = await fn();
     await store.recordHealth(source, true, summarizeForHealth(value), null);
@@ -140,6 +142,7 @@ async function tracked(env, store, source, fn) {
     }
     throw error;
   }
+  });
 }
 
 async function dispatchRentalStoreWebsiteBackup(env) {
