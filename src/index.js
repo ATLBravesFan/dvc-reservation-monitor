@@ -503,7 +503,7 @@ async function statusResponse(env, store, html) {
   const healthWithStale = health.map(item => {
     const expected = SOURCE_EXPECTED_MINUTES[item.source];
     const checkedAt = Date.parse(item.lastCheckedAt || "");
-    const stale = Number.isFinite(checkedAt) && expected ? now - checkedAt > expected * 60_000 : false;
+    const stale = expected ? (!Number.isFinite(checkedAt) || now - checkedAt > expected * 60_000) : false;
     return { ...item, expectedMinutes: expected || null, stale };
   });
   const emailCount = await store.getEmailCount();
