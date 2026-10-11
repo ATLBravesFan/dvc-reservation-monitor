@@ -1,4 +1,5 @@
 import { chromium } from "playwright-core";
+import { parseDvcRentalDealsHtml } from "../src/dvc-rental-direct.js";
 
 const BASE_URL = process.env.DVC_MONITOR_BASE_URL;
 const TOKEN = process.env.DVC_MONITOR_INGEST_TOKEN;
@@ -28,12 +29,24 @@ try {
   const rows = await scrapeDeals(context);
   console.log(`DVC-Rental list: ${rows.length} reservations`);
 
-  await enrichPointDetails(context, rows);
-  const withPoints = rows.filter(row => Number.isFinite(row.points)).length;
-  const coverage = rows.length ? withPoints / rows.length : 0;
-  console.log(`DVC-Rental point detail coverage: ${withPoints}/${rows.length} (${Math.round(coverage * 100)}%)`);
+  // The browser list page can change its visible card layout independently of
+  // the structured reservation data. Never ingest a partial card row just
+  // because point enrichment succeeded: that previously produced alerts with
+  // only ID/resort/points and no dates or prices.
+  if (!rows.every(isCompleteReservation)) {
+    await enrichPointDetails(context, rows);
+  }
 
-  if (coverage < 0.8) {
+  const complete = rows.filter(isCompleteReservation).length;
+  const withPoints = rows.filter(row => Number.isFinite(row.points)).length;
+  const pointCoverage = rows.length ? withPoints / rows.length : 0;
+  console.log(`DVC-Rental complete detail coverage: ${complete}/${rows.length}`);
+  console.log(`DVC-Rental point detail coverage: ${withPoints}/${rows.length} (${Math.round(pointCoverage * 100)}%)`);
+
+  if (complete !== rows.length) {
+    throw new Error(`DVC-Rental browser detail coverage incomplete: ${complete}/${rows.length}. Snapshot was not ingested.`);
+  }
+  if (pointCoverage < 0.8) {
     throw new Error(`DVC-Rental point-detail coverage too low: ${withPoints}/${rows.length}. Snapshot was not ingested.`);
   }
 
@@ -52,6 +65,29 @@ async function scrapeDeals(context) {
     bodyText.match(/Showing\s+\d+\s*[–-]\s*\d+\s+of\s+(\d+)/i)?.[1] ||
     bodyText.match(/(\d+)\s+confirmed reservations/i)?.[1],
   );
+
+  // Prefer the complete reservation objects embedded in the rendered Next.js
+  // document. This keeps the browser fallback independent of visible card
+  // markup while preserving every field used in the email: room, dates,
+  // nights, total, nightly price, points and point pricing.
+  const structured = parseDvcRentalDealsHtml(await page.content());
+  if (structured.length) {
+    if (Number.isFinite(expected) && structured.length !== expected) {
+      await page.close();
+      throw new Error(`DVC-Rental structured browser count mismatch: expected ${expected}, parsed ${structured.length}`);
+    }
+    if (!structured.every(isCompleteReservation)) {
+      await page.close();
+      throw new Error(`DVC-Rental structured browser data was incomplete: ${structured.filter(isCompleteReservation).length}/${structured.length}`);
+    }
+    console.log("DVC-Rental browser using complete structured reservation data");
+    await page.close();
+    return structured;
+  }
+
+  // Retain the visible-card parser only as a last-resort discovery path. The
+  // completeness gate above ingest prevents these rows from ever generating
+  // stripped-down alerts if the site's card markup changes again.
   const pageSize = number(bodyText.match(/Showing\s+\d+\s*[–-]\s*(\d+)\s+of\s+\d+/i)?.[1]) || 50;
   const totalPages = Number.isFinite(expected) ? Math.max(1, Math.ceil(expected / pageSize)) : 2;
 
@@ -154,6 +190,14 @@ async function enrichPointDetails(context, rows) {
   });
 
   await Promise.all(workers);
+}
+
+function isCompleteReservation(row) {
+  return Boolean(
+    row?.id && row?.resort && row?.room && row?.checkIn && row?.checkOut &&
+    Number.isFinite(row?.nights) && Number.isFinite(row?.total) &&
+    Number.isFinite(row?.nightly) && Number.isFinite(row?.points)
+  );
 }
 
 async function ingest(listings) {
