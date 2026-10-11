@@ -1,1 +1,1 @@
-Deploy bounded 12-second upstream HTTP requests for all Worker sources, scheduler start heartbeat, and independent watch execution. Prevent hung upstream requests from leaving scheduled cycles incomplete.
+Deploy isolated scheduled source tasks.
