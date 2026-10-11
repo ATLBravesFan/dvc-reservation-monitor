@@ -71,7 +71,7 @@ export const WATCHES = {
   },
   dvcShop: {
     title: "DVC Shop",
-    interval: "10 minutes",
+    interval: "1 minute",
     priceChanges: false,
     match: r => !r.status || /available/i.test(r.status),
   },
@@ -99,7 +99,7 @@ export const SOURCE_EXPECTED_MINUTES = {
   "rental-store-website": 8,
   "rental-store-website-dispatch": 8,
   "davids": 8,
-  "dvc-shop": 15,
+  "dvc-shop": 3,
   "dvc-rental": 15,
   "dvc-rental-direct": 8,
   "dvc-rental-dispatch": 13,
