@@ -1,1 +1,1 @@
-Deploy parallel DVC source scheduler, five-minute website dispatch, and fifteen-minute independent GitHub fallback. Preserve D1, credentials, filters, and NFHS.
+Deploy per-watch last added and last changed timestamps on the monitor dashboard, persisted in D1 after successful alerts. Preserve all watch filters and scheduling.
