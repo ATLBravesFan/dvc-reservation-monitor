@@ -8,7 +8,7 @@ const GITHUB_REPO = "ATLBravesFan/dvc-reservation-monitor";
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runScheduled(env, new Date(event.scheduledTime || Date.now())));
+    runScheduled(env, new Date(event.scheduledTime || Date.now()), ctx);
   },
 
   async fetch(request, env) {
@@ -51,42 +51,50 @@ export default {
   },
 };
 
-async function runScheduled(env, now) {
+function runScheduled(env, now, ctx) {
   const store = new Storage(env.DB);
   const minute = now.getUTCMinutes();
   const fiveMinuteCycle = minute % 5 === 0;
   const tenMinuteCycle = minute % 10 === 0;
 
-  // Run independent sources concurrently. A slow API, browser dispatch, or
-  // email must never prevent the other watches from reaching their time slots.
+  // Crucial: register each watch independently. Never make a scheduled
+  // invocation wait for all sources or for a shared D1 heartbeat.
+  // An indefinitely stalled watch cannot hold other checks hostage.
   const jobs = [
-    ["rentalStore", async () => tracked(env, store, "rental-store-api", () => pollRentalStore(env, store, tenMinuteCycle))],
+    ["rentalStore", () => tracked(env, store, "rental-store-api", () => pollRentalStore(env, store, tenMinuteCycle))],
     ["dvcShop", () => pollDvcShop(env, store)],
   ];
   if (fiveMinuteCycle) {
-    jobs.push(["rentalStoreWebsiteDispatch", async () => tracked(env, store, "rental-store-website-dispatch", () => dispatchRentalStoreWebsiteBackup(env))]);
+    jobs.push(["rentalStoreWebsiteDispatch", () => tracked(env, store, "rental-store-website-dispatch", () => dispatchRentalStoreWebsiteBackup(env))]);
     jobs.push(["davids", () => pollDavids(env, store)]);
   }
 
-  // Persist a heartbeat before external calls: an incomplete cycle is visible in /health.
-  await store.putMeta("last-scheduled-start", { scheduledAt: now.toISOString(), startedAt: new Date().toISOString(), jobs: jobs.map(([name]) => name) });
-  const settled = await Promise.allSettled(jobs.map(async ([name, run]) => [name, await run()]));
-  const result = {};
-  for (let i = 0; i < settled.length; i++) {
-    const outcome = settled[i];
-    if (outcome.status === "fulfilled") {
-      const [name, value] = outcome.value;
-      result[name] = value;
-    } else {
-      result[jobs[i][0]] = { ok: false, error: errorMessage(outcome.reason) };
-    }
+  // The heartbeat is non-critical; it must never block scheduling.
+  ctx.waitUntil(store.putMeta("last-scheduled-start", {
+    scheduledAt: now.toISOString(), startedAt: new Date().toISOString(),
+    jobs: jobs.map(([name]) => name),
+  }).catch(error => console.error("scheduler heartbeat failed", errorMessage(error))));
+
+  for (const [name, run] of jobs) {
+    ctx.waitUntil((async () => {
+      try {
+        const result = await run();
+        // Source health is recorded independently by tracked().
+        // Keep this summary for the existing dashboard, but it is advisory.
+        await store.putMeta("last-scheduled", {
+          source: name, result, scheduledAt: now.toISOString(),
+          checkedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.error("scheduled watch failed", name, errorMessage(error));
+      }
+    })());
   }
 
   if (minute === 7) {
-    try { await store.cleanupExpiredAlerts(); } catch { /* non-critical cleanup */ }
+    ctx.waitUntil(store.cleanupExpiredAlerts().catch(error =>
+      console.error("alert cleanup failed", errorMessage(error))));
   }
-  await store.putMeta("last-scheduled", { ...result, scheduledAt: now.toISOString(), checkedAt: new Date().toISOString() });
-  return result;
 }
 
 async function runManual(env, store, mode) {
