@@ -24,6 +24,11 @@ CREATE TABLE IF NOT EXISTS alert_outbox (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   next_attempt_at TEXT,
-  last_error TEXT
+  last_error TEXT,
+  title TEXT,
+  show_matches INTEGER NOT NULL DEFAULT 1,
+  priority INTEGER NOT NULL DEFAULT 0,
+  lease_until TEXT,
+  provider_message_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_alert_outbox_pending ON alert_outbox(status, next_attempt_at);
