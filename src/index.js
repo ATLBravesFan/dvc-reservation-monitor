@@ -105,6 +105,8 @@ async function runManual(env, store, mode) {
     return { rentalStoreWebsiteDispatch: await tracked(env, store, "rental-store-website-dispatch", () => dispatchRentalStoreWebsiteBackup(env)) };
   }
   if (mode === "slow") return { slower: await pollSlowerHttpSources(env, store) };
+  if (mode === "dvc-shop") return { dvcShop: await pollDvcShop(env, store) };
+  if (mode === "davids") return { davids: await pollDavids(env, store) };
   if (mode === "test-email") {
     await sendSystemEmail(env, store, "DVC Monitor test email", "The DVC monitor email connection is working.");
     return { testEmail: { ok: true } };
