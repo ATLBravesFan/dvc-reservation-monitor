@@ -1,3 +1,4 @@
+import { boundedFetch } from "./bounded-fetch.js";
 import { URLS, WATCHES, EMAIL_LIMITS, SOURCE_EXPECTED_MINUTES } from "./config.js";
 import { parseKeyholder, parseExternalRentalStore, parseDavids, parseDvcShop, fingerprint, formatListing, priceSummary, byId } from "./parsers.js";
 import { Storage, utcDay } from "./storage.js";
@@ -67,6 +68,8 @@ async function runScheduled(env, now) {
     jobs.push(["davids", () => pollDavids(env, store)]);
   }
 
+  // Persist a heartbeat before external calls: an incomplete cycle is visible in /health.
+  await store.putMeta("last-scheduled-start", { scheduledAt: now.toISOString(), startedAt: new Date().toISOString(), jobs: jobs.map(([name]) => name) });
   const settled = await Promise.allSettled(jobs.map(async ([name, run]) => [name, await run()]));
   const result = {};
   for (let i = 0; i < settled.length; i++) {
@@ -82,7 +85,7 @@ async function runScheduled(env, now) {
   if (minute === 7) {
     try { await store.cleanupExpiredAlerts(); } catch { /* non-critical cleanup */ }
   }
-  await store.putMeta("last-scheduled", { ...result, checkedAt: new Date().toISOString() });
+  await store.putMeta("last-scheduled", { ...result, scheduledAt: now.toISOString(), checkedAt: new Date().toISOString() });
   return result;
 }
 
@@ -132,7 +135,7 @@ async function tracked(env, store, source, fn) {
 async function dispatchRentalStoreWebsiteBackup(env) {
   if (!env.GITHUB_DISPATCH_TOKEN) throw new Error("GITHUB_DISPATCH_TOKEN not configured");
 
-  const response = await fetch(
+  const response = await boundedFetch(
     `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${RENTAL_STORE_BACKUP_WORKFLOW}/dispatches`,
     {
       method: "POST",
@@ -154,7 +157,7 @@ async function dispatchRentalStoreWebsiteBackup(env) {
 }
 
 async function pollRentalStore(env, store, includeAllReservationsWatch = false) {
-  const response = await fetch(URLS.rentalStoreApi, {
+  const response = await boundedFetch(URLS.rentalStoreApi, {
     headers: { Accept: "application/json", "User-Agent": "DVC-Monitor/2.0" },
   });
   if (!response.ok) throw new Error(`Keyholder API ${response.status}`);
@@ -448,7 +451,7 @@ async function sendBrevo(env, subject, htmlBody) {
     throw new Error("Email is not configured: BREVO_API_KEY, EMAIL_TO and EMAIL_FROM are required");
   }
 
-  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+  const response = await boundedFetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -497,6 +500,7 @@ async function statusResponse(env, store, html) {
   const watchKeys = Object.keys(WATCHES);
   const watchActivity = await Promise.all(watchKeys.map(key => store.getMeta(`watch-events:${key}`)));
   const lastScheduled = await store.getMeta("last-scheduled");
+  const lastScheduledStart = await store.getMeta("last-scheduled-start");
   const degraded = healthWithStale.some(item => !item.ok || item.stale || item.consecutiveFailures >= 3);
 
   const payload = {
@@ -526,6 +530,7 @@ async function statusResponse(env, store, html) {
     },
     health: healthWithStale,
     lastScheduled,
+    lastScheduledStart,
     checkedAt: new Date().toISOString(),
   };
 
@@ -582,7 +587,7 @@ function numberOrNull(value) {
 }
 
 async function fetchText(url) {
-  const response = await fetch(url, {
+  const response = await boundedFetch(url, {
     headers: {
       Accept: "text/html,application/xhtml+xml",
       "User-Agent": "Mozilla/5.0 (compatible; DVC-Monitor/2.0)",
