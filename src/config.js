@@ -83,14 +83,15 @@ export const WATCHES = {
   },
 };
 
-// With Pushover e-mail gateway enabled, each alert is delivered to two
-// recipients (notification Gmail + Pushover). These conservative message
-// limits keep total Brevo recipient deliveries below the 300/day free allowance.
+// Production delivery can use three Brevo recipients per alert:
+// notification-only Gmail + primary Gmail copy + Pushover e-mail gateway.
+// These limits keep the theoretical daily maximum below Brevo's 300-recipient
+// free-tier allowance while reserving room for priority bargain alerts.
 export const EMAIL_LIMITS = {
-  providerDaily: 150,
-  warningAt: 110,
-  lowPriorityCutoff: 125,
-  hardSafetyCutoff: 145,
+  providerDaily: 100,
+  warningAt: 70,
+  lowPriorityCutoff: 82,
+  hardSafetyCutoff: 96,
 };
 
 export const SOURCE_EXPECTED_MINUTES = {
