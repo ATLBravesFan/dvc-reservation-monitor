@@ -3,6 +3,7 @@ import { URLS, WATCHES, EMAIL_LIMITS, SOURCE_EXPECTED_MINUTES } from "./config.j
 import { parseKeyholder, parseExternalRentalStore, parseDavids, parseDvcShop, fingerprint, formatListing, priceSummary, byId } from "./parsers.js";
 import { Storage, utcDay } from "./storage.js";
 import { withLease } from "./execution-lease.js";
+import { assertInventoryHealthy } from "./inventory-guard.js";
 
 const RENTAL_STORE_BACKUP_WORKFLOW = "dvc-rental-store-website-backup.yml";
 const GITHUB_REPO = "ATLBravesFan/dvc-reservation-monitor";
@@ -205,6 +206,7 @@ function validateRentalStoreRows(rows) {
 async function processRentalStoreFast(env, store, rows) {
   const key = "rental-store-fast";
   const previous = await store.getSnapshot(key);
+  assertInventoryHealthy(previous, rows, key);
   const current = byId(rows);
 
   if (!previous) {
@@ -229,6 +231,7 @@ async function processRentalStoreFast(env, store, rows) {
 async function processRentalStoreAllWatch(env, store, rows) {
   const key = "rental-store-all";
   const previous = await store.getSnapshot(key);
+  assertInventoryHealthy(previous, rows, key);
   const current = byId(rows);
 
   if (!previous) {
@@ -261,6 +264,7 @@ function bargainMatches(listing) {
 async function processRentalStoreWebsite(env, store, rows) {
   const key = "rental-store-website";
   const previous = await store.getSnapshot(key);
+  assertInventoryHealthy(previous, rows, key);
   const current = byId(rows);
   const qualifying = rows.filter(r => bargainMatches(r).length > 0);
 
@@ -331,6 +335,7 @@ async function pollSlowerHttpSources(env, store) {
 
 async function processStandardWatch(env, store, key, watch, rows) {
   const previous = await store.getSnapshot(key);
+  assertInventoryHealthy(previous, rows, key);
   const current = byId(rows);
 
   if (!previous) {
