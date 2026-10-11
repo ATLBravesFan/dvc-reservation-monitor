@@ -375,6 +375,8 @@ async function sendEvents(env, store, source, title, events, showMatches) {
   // Persist before advancing snapshots. Repeated source polls cannot create duplicate keys.
   for (const event of events) {
     const key = alertKey(source, event.listing);
+    const existing = await env.DB.prepare("SELECT status FROM alerts WHERE alert_key=?").bind(key).first();
+    if (existing?.status === "sent") continue;
     await enqueueOutbox(env.DB, { key, source, listingId: event.listing.id, event,
       title, showMatches, priority: (event.matches || bargainMatches(event.listing)).length > 0 });
   }
@@ -398,6 +400,10 @@ async function drainOutbox(env, store, limit = 20) {
     const event = JSON.parse(row.payload);
     let providerCalled = false;
     try {
+      if (!env.BREVO_API_KEY || !env.EMAIL_TO || !env.EMAIL_FROM) {
+        await requeueOutbox(env.DB,row.alert_key,"Email configuration missing",300);
+        continue;
+      }
       providerCalled = true;
       await sendEmail(env,row.title || row.source,[event],Boolean(row.show_matches));
       // Brevo accepted the email; a D1 failure after this point is ambiguous.
