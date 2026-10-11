@@ -31,9 +31,9 @@ const workerMain = join(repoRoot, config.main);
 config.main = workerMain;
 
 // Bargain alerts that include any Friday, Saturday, or Sunday date in the
-// displayed reservation range receive extra exclamation emphasis around the
-// existing flame subject. The check intentionally includes the checkout date,
-// matching the date range the user sees in the reservation alert.
+// displayed reservation range receive a WEEKEND BARGAIN DEAL label plus the
+// existing exclamation/flame emphasis. The check intentionally includes the
+// checkout date, matching the date range the user sees in the reservation alert.
 const weekendHelper = [
   "function reservationIncludesWeekend(listing) {",
   "  const start = Date.parse(String(listing?.checkIn || \"\") + \"T00:00:00Z\");",
@@ -46,9 +46,18 @@ const weekendHelper = [
   "  return false;",
   "}",
   "",
+  "function isWeekendBargainAlert(events, isBargain) {",
+  "  return Boolean(isBargain) && events.some(event => reservationIncludesWeekend(event.listing));",
+  "}",
+  "",
   "function decorateWeekendBargainSubject(subject, events, isBargain) {",
-  "  if (!isBargain || !events.some(event => reservationIncludesWeekend(event.listing))) return subject;",
-  "  return `‼️ ${subject} ‼️`;",
+  "  if (!isWeekendBargainAlert(events, isBargain)) return subject;",
+  "  return `‼️ WEEKEND BARGAIN DEAL — ${subject} ‼️`;",
+  "}",
+  "",
+  "function weekendBargainBanner(events, isBargain) {",
+  "  if (!isWeekendBargainAlert(events, isBargain)) return \"\";",
+  "  return '<div style=\"font-size:18px;font-weight:800;margin:0 0 12px 0\">‼️ WEEKEND BARGAIN DEAL ‼️</div>';",
   "}",
   "",
 ].join("\n");
@@ -72,22 +81,29 @@ const weekendHelper = [
     "    Boolean(prioritySubject),",
     "  );",
   ].join("\n");
+  const bodyNeedle = '  await sendBrevo(env, subject, `<h2>${escapeHtml(title)}</h2>${blocks}`);';
+  const bodyReplacement = [
+    "  const weekendBanner = weekendBargainBanner(events, Boolean(prioritySubject));",
+    '  await sendBrevo(env, subject, `${weekendBanner}<h2>${escapeHtml(title)}</h2>${blocks}`);',
+  ].join("\n");
   const recipientNeedle = "      to: [{ email: env.EMAIL_TO }],";
   const recipientReplacement = `${recipientNeedle}\n      ...(env.EMAIL_FROM && env.EMAIL_FROM.trim().toLowerCase() !== env.EMAIL_TO.trim().toLowerCase() ? { cc: [{ email: env.EMAIL_FROM.trim() }] } : {}),\n      ...(env.PUSHOVER_EMAIL ? { bcc: [{ email: env.PUSHOVER_EMAIL }] } : {}),`;
 
   if (!original.includes(helperNeedle)) throw new Error("Could not locate standard alert helper insertion point");
   if (!original.includes(subjectNeedle)) throw new Error("Could not locate standard bargain subject line");
+  if (!original.includes(bodyNeedle)) throw new Error("Could not locate standard alert email body");
   if (!original.includes(recipientNeedle)) throw new Error("Could not locate standard Brevo recipient block for dual-Gmail routing");
 
   const modified = original
     .replace(helperNeedle, `${weekendHelper}${helperNeedle}`)
     .replace(subjectNeedle, subjectReplacement)
+    .replace(bodyNeedle, bodyReplacement)
     .replace(recipientNeedle, recipientReplacement);
   writeFileSync(notificationModule, modified);
 }
 
 // Rare Finds has its own mail helper and already contains the Pushover BCC.
-// Apply the same weekend-bargain subject emphasis and primary-Gmail copy there.
+// Apply the same weekend-bargain subject/body label and primary-Gmail copy there.
 {
   const rareFindsModule = join(repoRoot, "src", "rare-finds.js");
   const original = readFileSync(rareFindsModule, "utf8");
@@ -101,16 +117,23 @@ const weekendHelper = [
     "      Boolean(prioritySubject),",
     "    );",
   ].join("\n");
+  const bodyNeedle = '    await sendBrevo(env, subject, `<h2>DVCReservations Rare Finds</h2>${blocks}`);';
+  const bodyReplacement = [
+    "    const weekendBanner = weekendBargainBanner(claimed, Boolean(prioritySubject));",
+    '    await sendBrevo(env, subject, `${weekendBanner}<h2>DVCReservations Rare Finds</h2>${blocks}`);',
+  ].join("\n");
   const recipientNeedle = "      to: [{ email: env.EMAIL_TO }],";
   const recipientReplacement = `${recipientNeedle}\n      ...(env.EMAIL_FROM && env.EMAIL_FROM.trim().toLowerCase() !== env.EMAIL_TO.trim().toLowerCase() ? { cc: [{ email: env.EMAIL_FROM.trim() }] } : {}),`;
 
   if (!original.includes(helperNeedle)) throw new Error("Could not locate Rare Finds bargain helper insertion point");
   if (!original.includes(subjectNeedle)) throw new Error("Could not locate Rare Finds bargain subject line");
+  if (!original.includes(bodyNeedle)) throw new Error("Could not locate Rare Finds email body");
   if (!original.includes(recipientNeedle)) throw new Error("Could not locate Rare Finds Brevo recipient block for dual-Gmail routing");
 
   const modified = original
     .replace(helperNeedle, `${weekendHelper}${helperNeedle}`)
     .replace(subjectNeedle, subjectReplacement)
+    .replace(bodyNeedle, bodyReplacement)
     .replace(recipientNeedle, recipientReplacement);
   writeFileSync(rareFindsModule, modified);
 }
@@ -207,7 +230,7 @@ try {
   if (url) console.log(`DVC_MONITOR_BASE_URL=${url}`);
   console.log(`Primary Gmail copy: ${process.env.EMAIL_FROM?.trim() && process.env.EMAIL_FROM.trim().toLowerCase() !== process.env.EMAIL_TO.trim().toLowerCase() ? "enabled" : "same as notification inbox"}`);
   console.log(`Pushover e-mail gateway: ${process.env.PUSHOVER_EMAIL?.trim() ? "enabled" : "not configured"}`);
-  console.log("Weekend bargain subject emphasis: enabled for Friday/Saturday/Sunday date ranges");
+  console.log("Weekend bargain subject/body label: WEEKEND BARGAIN DEAL for Friday/Saturday/Sunday date ranges");
   console.log("Deployment complete. Keep ChangeDetection enabled until the 48-hour parallel verification is complete.");
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
