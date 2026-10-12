@@ -1,0 +1,26 @@
+name: DVC reliability tests
+on:
+  push:
+    paths:
+      - "src/**"
+      - "scripts/**"
+      - "test/**"
+      - "package.json"
+      - ".github/workflows/reliability-tests.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dvc-reliability-tests
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
