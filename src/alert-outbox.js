@@ -54,10 +54,8 @@ export async function recoverExpiredSends(db,maxAttempts=2){
  };
 }
 
-// Backward-compatible helper retained for callers/tests that explicitly want
-// to quarantine every expired send without retrying it.
+// Existing Worker code calls this helper before every drain. Keep the exported
+// name to avoid a broad code change, but use the safer recovery policy above.
 export async function quarantineExpiredSends(db){
- const now=new Date().toISOString();
- return db.prepare(`UPDATE alert_outbox SET status='uncertain',last_error='Delivery lease expired; provider acceptance unknown',
- lease_until=NULL,updated_at=? WHERE status='sending' AND lease_until<=?`).bind(now,now).run();
+ return recoverExpiredSends(db);
 }
