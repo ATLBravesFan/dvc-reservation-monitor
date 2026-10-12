@@ -116,6 +116,7 @@ async function runDvcRentalDirect(env, now) {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
+        "X-DVC-Ingest-Origin": "direct",
       },
       body: JSON.stringify({ listings: rows }),
     }), env);
@@ -179,12 +180,12 @@ async function dispatchDvcRentalBrowser(env, now) {
   });
 }
 
-// If GitHub accepted a dispatch but no completed scrape reached D1, retry
+// If GitHub accepted a dispatch but no completed browser scrape reached D1, retry
 // on the next five-minute recovery slot. Never retry faster than five minutes.
 async function recoverStaleDvcRentalBrowser(env, now) {
   const store = new Storage(env.DB);
   const health = await store.allHealth();
-  const ingest = health.find(row => row.source === "dvc-rental");
+  const ingest = health.find(row => row.source === "dvc-rental-browser-ingest");
   const dispatch = health.find(row => row.source === "dvc-rental-dispatch");
   const lastIngest = Date.parse(ingest?.lastSuccessAt || "");
   const currentTime = Date.now();
