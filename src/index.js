@@ -47,6 +47,9 @@ export default {
       const normalized = normalizeBrowserRows(rows, "DVC-Rental");
       if (!normalized.length) return json({ ok: false, error: "No usable DVC-Rental reservations" }, 400);
       const result = await tracked(env, store, "dvc-rental", () => processStandardWatch(env, store, "dvc-rental", WATCHES.dvcRental, normalized));
+      if (!result?.skipped && request.headers.get("X-DVC-Ingest-Origin") !== "direct") {
+        await store.recordHealth("dvc-rental-browser-ingest", true, { count: normalized.length }, null);
+      }
       return json(result?.skipped ? { ok: false, ...result } : { ok: true, ...result }, result?.skipped ? 409 : 200);
     }
 
