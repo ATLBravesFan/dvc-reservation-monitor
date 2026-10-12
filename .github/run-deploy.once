@@ -1,3 +1,4 @@
 Deploy DVC reliability hardening with durable outbox, D1 migration, batched delivery, and delivery lock. 2026-10-11.
 Deploy independent rental-store-all recovery endpoint and watchdog mapping. 2026-10-12.
 Deploy independent 10-minute Rental Store scheduling; validate existing suite. 2026-10-12.
+Deploy Rental Store website backup all-reservation alerts and richer duplicate merging. 2026-10-12.
