@@ -4,6 +4,7 @@ import { URLS } from "./config.js";
 import { parseDvcRentalDealsHtml } from "./dvc-rental-direct.js";
 import { runRareFinds } from "./rare-finds.js";
 import { Storage } from "./storage.js";
+import { withLease } from "./execution-lease.js";
 
 const GITHUB_REPO = "ATLBravesFan/dvc-reservation-monitor";
 const DVC_RENTAL_WORKFLOW = "dvc-rental-browser.yml";
@@ -24,6 +25,9 @@ export default {
 
     if (minute % 10 === 0) {
       ctx.waitUntil(dispatchDvcRentalBrowser(env, now));
+    } else if (minute % 5 === 0) {
+      // Recovery uses the ingestion timestamp, not the dispatch timestamp.
+      ctx.waitUntil(recoverStaleDvcRentalBrowser(env, now));
     }
 
     if (minute % 15 === 0) {
@@ -141,6 +145,7 @@ async function runDvcRentalDirect(env, now) {
 
 async function dispatchDvcRentalBrowser(env, now) {
   const store = new Storage(env.DB);
+  return withLease(env.DB, "dvc-rental-browser-dispatch", async () => {
   try {
     if (!env.GITHUB_DISPATCH_TOKEN) throw new Error("GITHUB_DISPATCH_TOKEN not configured");
 
@@ -171,4 +176,19 @@ async function dispatchDvcRentalBrowser(env, now) {
     try { await store.recordHealth("dvc-rental-dispatch", false, null, message); } catch { /* keep dispatch failure primary */ }
     return { ok: false, error: message };
   }
+  });
+}
+
+// If GitHub accepted a dispatch but no completed scrape reached D1, retry
+// on the next five-minute recovery slot. Never retry faster than five minutes.
+async function recoverStaleDvcRentalBrowser(env, now) {
+  const store = new Storage(env.DB);
+  const health = await store.allHealth();
+  const ingest = health.find(row => row.source === "dvc-rental");
+  const dispatch = health.find(row => row.source === "dvc-rental-dispatch");
+  const lastIngest = Date.parse(ingest?.lastSuccessAt || "");
+  const lastDispatch = Date.parse(dispatch?.lastCheckedAt || "");
+  if (Number.isFinite(lastIngest) && now.getTime() - lastIngest < 15 * 60000) return { skipped: true, reason: "ingest-fresh" };
+  if (Number.isFinite(lastDispatch) && now.getTime() - lastDispatch < 5 * 60000) return { skipped: true, reason: "recent-dispatch" };
+  return dispatchDvcRentalBrowser(env, now);
 }
