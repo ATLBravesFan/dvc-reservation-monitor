@@ -21,6 +21,7 @@ for(const source of initial.health||[]){
 }
 console.log("Sources requiring recovery:",jobs.map(j=>j.source).join(", ")||"none");
 const failed=[];
+const results=[];
 await Promise.all(jobs.map(async job=>{
   try{
     const r=await fetch(base+"/run?mode="+encodeURIComponent(job.mode),{method:"POST",headers:{Authorization:"Bearer "+token},signal:timeout(45000)});
@@ -33,18 +34,28 @@ await Promise.all(jobs.map(async job=>{
       return Object.values(value).some(v=>v&&typeof v==="object"&&failedResult(v));
     }
     if(failedResult(result))throw Error("Recovery returned failure: "+body.slice(0,500));
+    function skippedResult(value){
+      if(!value||typeof value!=="object")return false;
+      if(value.skipped===true)return true;
+      return Object.values(value).some(v=>v&&typeof v==="object"&&skippedResult(v));
+    }
+    if(skippedResult(result))console.log("ALREADY RUNNING",job.source,"A lease prevented duplicate execution; waiting for its outcome.");
     // A successful /run response may queue a browser workflow rather than finish it.
     // Do not declare immediate failure before the async job has had time to report.
     let entry, updated;
+    let latest;
     for(let attempt=0;attempt<6;attempt++){
       const after=await health();
       entry=(after.health||[]).find(x=>x.source===job.source);
+      latest=entry;
       updated=Date.parse(entry?.lastSuccessAt||"");
       if(Number.isFinite(updated)&&updated>job.before)break;
       if(attempt<5)await new Promise(resolve=>setTimeout(resolve,10000));
     }
-    if(!Number.isFinite(updated)||updated<=job.before)throw Error("Source health did not advance within 50 seconds; inspect source runner and health mapping");
+    if(!Number.isFinite(updated)||updated<=job.before)throw Error("Source still unhealthy after recovery: "+JSON.stringify({source:job.source,lastCheckedAt:latest?.lastCheckedAt,lastSuccessAt:latest?.lastSuccessAt,consecutiveFailures:latest?.consecutiveFailures,lastError:latest?.lastError,runResult:result}).slice(0,1100));
     console.log("RECOVERED",job.source,entry.lastSuccessAt);
+    results.push(job.source);
   }catch(e){console.error("FAILED",job.source,String(e));failed.push(job.source);}
 }));
+console.log("Recovered:",results.join(", ")||"none");
 if(failed.length)throw Error("Recovery failed for: "+failed.join(", "));
