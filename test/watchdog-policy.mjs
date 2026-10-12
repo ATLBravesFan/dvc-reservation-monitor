@@ -1,0 +1,14 @@
+import assert from "node:assert/strict";
+import {recoveryJobs,recoveredRecently,EXPECTED_RECOVERY_MINUTES} from "../scripts/watchdog-policy.mjs";
+const now=Date.parse("2026-10-11T22:00:00Z");
+const fresh=Object.keys(EXPECTED_RECOVERY_MINUTES).map(source=>({source,lastSuccessAt:new Date(now-60000).toISOString()}));
+assert.equal(recoveryJobs(fresh,now).length,0,"fresh sources must not trigger recovery");
+assert.deepEqual(recoveryJobs([],now).map(x=>x.source).sort(),Object.keys(EXPECTED_RECOVERY_MINUTES).sort(),"missing health rows must trigger recovery");
+const missing=fresh.filter(x=>x.source!=="davids");
+assert.deepEqual(recoveryJobs(missing,now).map(x=>x.source),["davids"]);
+const stale=fresh.map(x=>x.source==="dvc-shop"?{...x,lastSuccessAt:new Date(now-30*60000).toISOString()}:x);
+assert.deepEqual(recoveryJobs(stale,now).map(x=>x.source),["dvc-shop"]);
+assert.equal(recoveredRecently("davids",0,now-60000,now),true);
+assert.equal(recoveredRecently("davids",now,now,now),false,"unchanged success time is not recovery");
+assert.equal(recoveredRecently("davids",0,now-30*60000,now),false,"old success is not recovery");
+console.log("Watchdog recovery policy tests passed");
