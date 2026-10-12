@@ -102,6 +102,19 @@ function runScheduled(env, now, ctx) {
 }
 
 async function runManual(env, store, mode) {
+  if (mode === "rental-store-all") {
+    // Recover the 10-minute all-inventory watch independently of the fast API poll lease.
+    // The fast watch runs every minute and can otherwise starve this recovery.
+    return { rentalStoreAll: await tracked(env, store, "rental-store-all", async () => {
+      const response = await boundedFetch(URLS.rentalStoreApi, {
+        headers: { Accept: "application/json", "User-Agent": "DVC-Monitor/2.0" },
+      });
+      if (!response.ok) throw new Error(`Keyholder API ${response.status}`);
+      const rows = parseKeyholder(await response.json());
+      validateRentalStoreRows(rows);
+      return processRentalStoreAllWatch(env, store, rows);
+    }) };
+  }
   if (mode === "rental-store") {
     return { rentalStore: await tracked(env, store, "rental-store-api", () => pollRentalStore(env, store, true)) };
   }
