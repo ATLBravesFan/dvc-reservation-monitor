@@ -34,6 +34,12 @@ await Promise.all(jobs.map(async job=>{
     }
     if(skippedResult(result))console.log("ALREADY RUNNING",job.source,"A lease prevented duplicate execution; waiting for its outcome.");
     // A successful /run response may queue a browser workflow rather than finish it.
+    // Dispatch acceptance is not ingestion; do not wait for a synchronous
+    // completion that GitHub Actions cannot guarantee.
+    if(job.source==="rental-store-website-dispatch"){
+      console.log("DISPATCH ACCEPTED",job.source,"Browser ingestion is tracked separately.");
+      return;
+    }
     // Do not declare immediate failure before the async job has had time to report.
     let entry, updated;
     let latest;
@@ -45,7 +51,9 @@ await Promise.all(jobs.map(async job=>{
       if(recoveredRecently(job.source,job.before,updated))break;
       if(attempt<5)await new Promise(resolve=>setTimeout(resolve,10000));
     }
-    if(!recoveredRecently(job.source,job.before,updated))throw Error("Source still unhealthy after recovery: "+JSON.stringify({source:job.source,lastCheckedAt:latest?.lastCheckedAt,lastSuccessAt:latest?.lastSuccessAt,consecutiveFailures:latest?.consecutiveFailures,lastError:latest?.lastError,runResult:result}).slice(0,1100));
+    if(!recoveredRecently(job.source,job.before,updated)){
+      throw Error("Source still unhealthy after recovery: "+JSON.stringify({source:job.source,lastCheckedAt:latest?.lastCheckedAt,lastSuccessAt:latest?.lastSuccessAt,consecutiveFailures:latest?.consecutiveFailures,lastError:latest?.lastError,runResult:result}).slice(0,1100));
+    }
     console.log("RECOVERED",job.source,entry.lastSuccessAt);
     results.push(job.source);
   }catch(e){console.error("FAILED",job.source,String(e));failed.push(job.source);}
