@@ -13,11 +13,11 @@ const initial=await health();
 const expected={"dvc-shop":3,"davids":8,"rental-store-all":12,"rental-store-website-dispatch":8};
 const modes={"dvc-shop":"dvc-shop","davids":"davids","rental-store-all":"rental-store-all","rental-store-website-dispatch":"website-backup-dispatch"};
 const jobs=[];
-for(const source of initial.health||[]){
-  const interval=expected[source.source];if(!interval)continue;
-  const last=Date.parse(source.lastSuccessAt||"");
+for(const [sourceName,interval] of Object.entries(expected)){
+  const source=(initial.health||[]).find(entry=>entry.source===sourceName);
+  const last=Date.parse(source?.lastSuccessAt||"");
   const delay=Number.isFinite(last)?(Date.now()-last)/60000-interval:Infinity;
-  if(delay>=10)jobs.push({source:source.source,mode:modes[source.source],before:last});
+  if(delay>=10)jobs.push({source:sourceName,mode:modes[sourceName],before:Number.isFinite(last)?last:0});
 }
 console.log("Sources requiring recovery:",jobs.map(j=>j.source).join(", ")||"none");
 const failed=[];
@@ -49,10 +49,10 @@ await Promise.all(jobs.map(async job=>{
       entry=(after.health||[]).find(x=>x.source===job.source);
       latest=entry;
       updated=Date.parse(entry?.lastSuccessAt||"");
-      if(Number.isFinite(updated)&&updated>job.before)break;
+      if(Number.isFinite(updated)&&updated>job.before && (Date.now()-updated)/60000<=expected[job.source]+10)break;
       if(attempt<5)await new Promise(resolve=>setTimeout(resolve,10000));
     }
-    if(!Number.isFinite(updated)||updated<=job.before)throw Error("Source still unhealthy after recovery: "+JSON.stringify({source:job.source,lastCheckedAt:latest?.lastCheckedAt,lastSuccessAt:latest?.lastSuccessAt,consecutiveFailures:latest?.consecutiveFailures,lastError:latest?.lastError,runResult:result}).slice(0,1100));
+    if(!Number.isFinite(updated)||updated<=job.before||(Date.now()-updated)/60000>expected[job.source]+10)throw Error("Source still unhealthy after recovery: "+JSON.stringify({source:job.source,lastCheckedAt:latest?.lastCheckedAt,lastSuccessAt:latest?.lastSuccessAt,consecutiveFailures:latest?.consecutiveFailures,lastError:latest?.lastError,runResult:result}).slice(0,1100));
     console.log("RECOVERED",job.source,entry.lastSuccessAt);
     results.push(job.source);
   }catch(e){console.error("FAILED",job.source,String(e));failed.push(job.source);}
