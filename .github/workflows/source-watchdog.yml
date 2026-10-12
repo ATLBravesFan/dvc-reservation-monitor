@@ -21,6 +21,20 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Recover abandoned email deliveries
+        shell: bash
+        env:
+          DVC_MONITOR_BASE_URL: ${{ secrets.DVC_MONITOR_BASE_URL }}
+          DVC_MONITOR_ADMIN_TOKEN: ${{ secrets.DVC_MONITOR_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$DVC_MONITOR_BASE_URL"
+          test -n "$DVC_MONITOR_ADMIN_TOKEN"
+          curl --fail --show-error --silent --max-time 35 \
+            -X POST \
+            -H "Authorization: Bearer $DVC_MONITOR_ADMIN_TOKEN" \
+            "${DVC_MONITOR_BASE_URL%/}/run?mode=drain-outbox"
+          echo
       - name: Recover consistently overdue sources
         run: node scripts/watchdog.mjs
         env:
