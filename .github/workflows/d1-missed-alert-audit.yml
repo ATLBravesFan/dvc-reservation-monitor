@@ -16,13 +16,17 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DVC_MONITOR_BASE_URL: ${{ secrets.DVC_MONITOR_BASE_URL }}
+      DVC_MONITOR_ADMIN_TOKEN: ${{ secrets.DVC_MONITOR_ADMIN_TOKEN }}
     steps:
-      - name: Query D1 alert state
+      - name: Recover the three confirmed missed alerts
         shell: bash
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$DVC_MONITOR_BASE_URL"
+          test -n "$DVC_MONITOR_ADMIN_TOKEN"
 
           auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json")
           db_json=$(curl --fail --silent --show-error "${auth[@]}" \
@@ -40,23 +44,22 @@ jobs:
 
           ids="'a0fVJ000004EhQzYAK','a0fVJ000004EnJVYA0','a0fVJ000004EpbRYAS'"
 
-          echo '=== legacy alert ledger ==='
-          query "SELECT listing_id,status,created_at,sent_at,expires_at,alert_key FROM alerts WHERE listing_id IN ($ids) ORDER BY created_at;"
+          echo '=== before recovery ==='
+          query "SELECT listing_id,status,attempts,last_error FROM alert_outbox WHERE listing_id IN ($ids) ORDER BY listing_id;"
 
-          echo '=== durable outbox ==='
-          query "SELECT listing_id,status,attempts,created_at,updated_at,next_attempt_at,last_error,priority,title,alert_key FROM alert_outbox WHERE listing_id IN ($ids) ORDER BY created_at;"
+          # Gmail was audited and none of these three alerts was delivered. Only
+          # these exact uncertain rows are requeued; already-sent rows are never touched.
+          query "UPDATE alert_outbox SET status='pending',next_attempt_at=CURRENT_TIMESTAMP,lease_until=NULL,last_error='Requeued after Gmail audit confirmed no delivery',updated_at=CURRENT_TIMESTAMP WHERE status='uncertain' AND listing_id IN ($ids);"
 
-          echo '=== snapshot membership ==='
-          query "SELECT source,updated_at,instr(payload,'a0fVJ000004EhQzYAK')>0 AS ehqz,instr(payload,'a0fVJ000004EnJVYA0')>0 AS enjv,instr(payload,'a0fVJ000004EpbRYAS')>0 AS epbr FROM snapshots WHERE source IN ('rental-store-all','rental-store-fast','rental-store-website') ORDER BY source;"
+          echo '=== drain recovered alerts through deployed Worker ==='
+          curl --fail --show-error --silent \
+            -X POST \
+            -H "Authorization: Bearer $DVC_MONITOR_ADMIN_TOKEN" \
+            "${DVC_MONITOR_BASE_URL%/}/run?mode=drain-outbox"
+          echo
 
-          echo '=== outbox drain executions around the miss ==='
-          query "SELECT source,started_at,finished_at,outcome,error FROM execution_history WHERE source='alert-outbox-drain' AND started_at>='2026-10-12T14:39:00Z' AND started_at<='2026-10-12T14:47:00Z' ORDER BY started_at;"
-
-          echo '=== all executions around the claim ==='
-          query "SELECT source,started_at,finished_at,outcome,error FROM execution_history WHERE started_at>='2026-10-12T14:40:50Z' AND started_at<='2026-10-12T14:42:00Z' ORDER BY started_at;"
-
-          echo '=== email counter ==='
-          query "SELECT day,emails_sent,updated_at FROM counters ORDER BY day DESC LIMIT 2;"
-
-          echo '=== current outbox counts ==='
-          query "SELECT status,priority,COUNT(*) AS count,MIN(created_at) AS oldest,MAX(created_at) AS newest FROM alert_outbox GROUP BY status,priority ORDER BY status,priority DESC;"
+          sleep 2
+          echo '=== after recovery ==='
+          result=$(query "SELECT listing_id,status,attempts,last_error FROM alert_outbox WHERE listing_id IN ($ids) ORDER BY listing_id;")
+          echo "$result"
+          test "$(printf '%s' "$result" | jq '[.[] | select(.status=="sent")] | length')" = "3"
