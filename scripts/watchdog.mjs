@@ -45,7 +45,16 @@ await Promise.all(jobs.map(async job=>{
       if(recoveredRecently(job.source,job.before,updated))break;
       if(attempt<5)await new Promise(resolve=>setTimeout(resolve,10000));
     }
-    if(!recoveredRecently(job.source,job.before,updated))throw Error("Source still unhealthy after recovery: "+JSON.stringify({source:job.source,lastCheckedAt:latest?.lastCheckedAt,lastSuccessAt:latest?.lastSuccessAt,consecutiveFailures:latest?.consecutiveFailures,lastError:latest?.lastError,runResult:result}).slice(0,1100));
+    if(!recoveredRecently(job.source,job.before,updated)){
+      // Dispatch-only recovery is asynchronous. A 204 from GitHub confirms
+      // acceptance, not browser completion. Let D1 ingestion health and the
+      // next watchdog cycle determine whether it ultimately succeeded.
+      if(job.source==="rental-store-website-dispatch"){
+        console.log("DISPATCH ACCEPTED",job.source,"Browser ingestion remains independently monitored.");
+        return;
+      }
+      throw Error("Source still unhealthy after recovery: "+JSON.stringify({source:job.source,lastCheckedAt:latest?.lastCheckedAt,lastSuccessAt:latest?.lastSuccessAt,consecutiveFailures:latest?.consecutiveFailures,lastError:latest?.lastError,runResult:result}).slice(0,1100));
+    }
     console.log("RECOVERED",job.source,entry.lastSuccessAt);
     results.push(job.source);
   }catch(e){console.error("FAILED",job.source,String(e));failed.push(job.source);}
