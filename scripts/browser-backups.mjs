@@ -342,8 +342,27 @@ async function ingest(path, listings) {
 
 function dedupe(rows) {
   const map = new Map();
-  for (const row of rows) if (row?.id) map.set(String(row.id), row);
+  for (const row of rows) {
+    if (!row?.id) continue;
+    const key = String(row.id);
+    const existing = map.get(key);
+    if (!existing || completenessScore(row) > completenessScore(existing)) map.set(key, row);
+  }
   return [...map.values()];
+}
+
+function completenessScore(row) {
+  return [
+    row?.resort,
+    row?.room,
+    row?.checkIn,
+    row?.checkOut,
+    Number.isFinite(row?.nights),
+    Number.isFinite(row?.total),
+    Number.isFinite(row?.points),
+    Number.isFinite(row?.nightly),
+    Number.isFinite(row?.pointPrice),
+  ].filter(Boolean).length;
 }
 
 function splitRoom(value) {
