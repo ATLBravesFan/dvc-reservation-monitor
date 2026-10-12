@@ -301,14 +301,16 @@ async function processRentalStoreWebsite(env, store, rows) {
   }
 
   const events = [];
-  for (const listing of qualifying) {
+  for (const listing of rows) {
     const matches = bargainMatches(listing);
     const old = previous[listing.id];
     if (!old) events.push({ type: "NEW", listing, matches });
-    else if (fingerprint(old) !== fingerprint(listing)) events.push({ type: "PRICE CHANGE", listing, previous: old, matches });
+    else if (WATCHES.rentalStoreAll.priceChanges && fingerprint(old) !== fingerprint(listing)) {
+      events.push({ type: "PRICE CHANGE", listing, previous: old, matches });
+    }
   }
 
-  const delivery = await sendEvents(env, store, "dvc-rental-store", "DVC Rental Store", events, true);
+  const delivery = await sendEvents(env, store, "dvc-rental-store", WATCHES.rentalStoreAll.title, events, true);
   if (!delivery.deferred) await putSnapshotIfChanged(store, key, previous, current);
 
   return {
