@@ -11,7 +11,7 @@ async function health(){
 }
 const initial=await health();
 const expected={"dvc-shop":3,"davids":8,"rental-store-all":12,"rental-store-website-dispatch":8};
-const modes={"dvc-shop":"dvc-shop","davids":"davids","rental-store-all":"rental-store","rental-store-website-dispatch":"website-backup-dispatch"};
+const modes={"dvc-shop":"dvc-shop","davids":"davids","rental-store-all":"rental-store-all","rental-store-website-dispatch":"website-backup-dispatch"};
 const jobs=[];
 for(const source of initial.health||[]){
   const interval=expected[source.source];if(!interval)continue;
