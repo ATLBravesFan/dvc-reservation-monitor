@@ -2,7 +2,9 @@ name: DVC source recovery watchdog
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Cloudflare handles five-minute recovery; GitHub is a best-effort backup.
+    # Stagger away from minute 0 to reduce scheduled Actions congestion.
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
   push:
     paths:
