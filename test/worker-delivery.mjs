@@ -4,7 +4,7 @@ import worker from "../src/index.js";
 // Exercise the real authenticated Worker route and Brevo request construction
 // with an in-memory D1 adapter. No real emails, secrets, or production writes.
 const rows=new Map(), counters=new Map(), ledger=new Map(), leases=new Map();
-let sends=0, providerStatus=201;
+let sends=0, providerStatus=201, providerThrows=false;
 const realFetch=globalThis.fetch;
 globalThis.fetch=async (url,opts)=>{
  assert.match(String(url),/api\.brevo\.com\/v3\/smtp\/email/);
@@ -12,6 +12,7 @@ globalThis.fetch=async (url,opts)=>{
  assert.equal(payload.to[0].email,"test@example.com");
  assert.match(payload.htmlContent,/Book this reservation/);
  sends++;
+ if(providerThrows) throw new Error("simulated connection interruption after request started");
  return new Response(providerStatus===201?'{"messageId":"fake"}':'{"error":"busy"}',{status:providerStatus,headers:{"content-type":"application/json"}});
 };
 function db(){
@@ -79,5 +80,12 @@ try{
  await drain();
  assert.equal(rows.get("second").status,"sent");
  assert.equal(sends,3);
+ providerThrows=true;
+ add("ambiguous");
+ await drain();
+ assert.equal(rows.get("ambiguous").status,"uncertain","ambiguous provider failure must be quarantined");
+ providerThrows=false;
+ await drain();
+ assert.equal(sends,4,"ambiguous delivery must not be retried automatically");
  console.log("Worker delivery integration tests passed");
 }finally{globalThis.fetch=realFetch;}
