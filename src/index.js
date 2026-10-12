@@ -65,9 +65,10 @@ function runScheduled(env, now, ctx) {
   // An indefinitely stalled watch cannot hold other checks hostage.
   ctx.waitUntil(drainOutbox(env, store, 20).catch(error => console.error("outbox drain failed",errorMessage(error))));
   const jobs = [
-    ["rentalStore", () => tracked(env, store, "rental-store-api", () => pollRentalStore(env, store, tenMinuteCycle))],
+    ["rentalStore", () => tracked(env, store, "rental-store-api", () => pollRentalStore(env, store, false))],
     ["dvcShop", () => pollDvcShop(env, store)],
   ];
+  if (tenMinuteCycle) jobs.push(["rentalStoreAll", () => runManual(env, store, "rental-store-all")]);
   if (fiveMinuteCycle) {
     jobs.push(["rentalStoreWebsiteDispatch", () => tracked(env, store, "rental-store-website-dispatch", () => dispatchRentalStoreWebsiteBackup(env))]);
     jobs.push(["davids", () => pollDavids(env, store)]);
