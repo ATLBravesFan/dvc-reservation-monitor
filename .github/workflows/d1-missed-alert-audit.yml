@@ -1,0 +1,56 @@
+name: D1 missed-alert audit
+
+on:
+  push:
+    paths:
+      - ".github/workflows/d1-missed-alert-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Query D1 alert state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+          auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json")
+          db_json=$(curl --fail --silent --show-error "${auth[@]}" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database")
+          db_id=$(printf '%s' "$db_json" | jq -r '.result[] | select(.name=="dvc-monitor-state") | .uuid' | head -1)
+          test -n "$db_id" -a "$db_id" != "null"
+
+          query() {
+            local sql="$1"
+            curl --fail --silent --show-error "${auth[@]}" \
+              -X POST \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$db_id/query" \
+              --data "$(jq -nc --arg sql "$sql" '{sql:$sql}')" | jq -c '.result[]?.results // []'
+          }
+
+          ids="'a0fVJ000004EhQzYAK','a0fVJ000004EnJVYA0','a0fVJ000004EpbRYAS'"
+
+          echo '=== legacy alert ledger ==='
+          query "SELECT listing_id,status,created_at,sent_at,expires_at,alert_key FROM alerts WHERE listing_id IN ($ids) ORDER BY created_at;"
+
+          echo '=== durable outbox ==='
+          query "SELECT listing_id,status,attempts,created_at,updated_at,next_attempt_at,last_error,priority,title,alert_key FROM alert_outbox WHERE listing_id IN ($ids) ORDER BY created_at;"
+
+          echo '=== snapshot membership ==='
+          query "SELECT source,updated_at,instr(payload,'a0fVJ000004EhQzYAK')>0 AS ehqz,instr(payload,'a0fVJ000004EnJVYA0')>0 AS enjv,instr(payload,'a0fVJ000004EpbRYAS')>0 AS epbr FROM snapshots WHERE source IN ('rental-store-all','rental-store-fast','rental-store-website') ORDER BY source;"
+
+          echo '=== email counter ==='
+          query "SELECT day,emails_sent,updated_at FROM counters ORDER BY day DESC LIMIT 2;"
+
+          echo '=== current outbox counts ==='
+          query "SELECT status,priority,COUNT(*) AS count,MIN(created_at) AS oldest,MAX(created_at) AS newest FROM alert_outbox GROUP BY status,priority ORDER BY status,priority DESC;"
