@@ -32,7 +32,8 @@ await Promise.all(jobs.map(async job=>{
       if(value.skipped===true)return true;
       return Object.values(value).some(v=>v&&typeof v==="object"&&skippedResult(v));
     }
-    if(skippedResult(result))console.log("ALREADY RUNNING",job.source,"A lease prevented duplicate execution; waiting for its outcome.");
+    const alreadyRunning=skippedResult(result);
+    if(alreadyRunning)console.log("ALREADY RUNNING",job.source,"A lease prevented duplicate execution; checking health before deciding.");
     // A successful /run response may queue a browser workflow rather than finish it.
     // Dispatch acceptance is not ingestion; do not wait for a synchronous
     // completion that GitHub Actions cannot guarantee.
@@ -50,6 +51,13 @@ await Promise.all(jobs.map(async job=>{
       updated=Date.parse(entry?.lastSuccessAt||"");
       if(recoveredRecently(job.source,job.before,updated))break;
       if(attempt<5)await new Promise(resolve=>setTimeout(resolve,10000));
+    }
+    // A lease skip means another check owns the source. A healthy latest status
+    // is not proof of a fresh recovery, but should not falsely fail this run.
+    // Continue failing for actual source errors or consecutive failures.
+    if(alreadyRunning && latest?.ok === true && Number(latest?.consecutiveFailures || 0) === 0 && !latest?.lastError){
+      console.log("DEFERRED",job.source,"Another check holds the lease; latest health has no failures. Freshness remains monitored.");
+      return;
     }
     if(!recoveredRecently(job.source,job.before,updated)){
       throw Error("Source still unhealthy after recovery: "+JSON.stringify({source:job.source,lastCheckedAt:latest?.lastCheckedAt,lastSuccessAt:latest?.lastSuccessAt,consecutiveFailures:latest?.consecutiveFailures,lastError:latest?.lastError,runResult:result}).slice(0,1100));
