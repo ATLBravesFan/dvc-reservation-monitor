@@ -37,13 +37,18 @@ function db(){
   }
   if(sql.includes("status='sending'")&&sql.includes("attempts=attempts+1")){
    const r=rows.get(args[2]);if(!r||r.status!=="pending")return {meta:{changes:0}};
-   r.status="sending";r.attempts++;return {meta:{changes:1}};
+   r.status="sending";r.attempts++;r.lease_until=args[0];return {meta:{changes:1}};
   }
   if(sql.includes("status='sent'")&&sql.includes("provider_message_id")){
    const r=rows.get(args[2]);if(r?.status==="sending")r.status="sent";return {meta:{changes:1}};
   }
+  if(sql.includes("status='pending'")&&sql.includes("attempts<?")){
+   let n=0;for(const r of rows.values())if(r.status==="sending"&&r.lease_until<=args[2]&&r.attempts<args[3]){r.status="pending";r.next_attempt_at=args[0];r.lease_until=null;n++;}return {meta:{changes:n}};
+  }
+  if(sql.includes("status='uncertain'")&&sql.includes("attempts>=?")){
+   let n=0;for(const r of rows.values())if(r.status==="sending"&&r.lease_until<=args[1]&&r.attempts>=args[2]){r.status="uncertain";r.lease_until=null;n++;}return {meta:{changes:n}};
+  }
   if(sql.includes("status='uncertain'")){
-   if(sql.includes("lease_until<=?"))return {meta:{changes:0}};
    const r=rows.get(args[2]);if(r?.status==="sending")r.status="uncertain";return {meta:{changes:1}};
   }
   if(sql.includes("status='pending'")&&sql.includes("next_attempt_at")){
@@ -83,9 +88,9 @@ try{
  providerThrows=true;
  add("ambiguous");
  await drain();
- assert.equal(rows.get("ambiguous").status,"uncertain","ambiguous provider failure must be quarantined");
+ assert.equal(rows.get("ambiguous").status,"uncertain","explicit ambiguous provider failure must be quarantined");
  providerThrows=false;
  await drain();
- assert.equal(sends,4,"ambiguous delivery must not be retried automatically");
+ assert.equal(sends,4,"explicit ambiguous delivery must not be retried automatically");
  console.log("Worker delivery integration tests passed");
 }finally{globalThis.fetch=realFetch;}
