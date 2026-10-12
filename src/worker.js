@@ -25,8 +25,9 @@ export default {
 
     if (minute % 10 === 0) {
       ctx.waitUntil(dispatchDvcRentalBrowser(env, now));
-    } else if (minute % 5 === 0) {
-      // Recovery uses the ingestion timestamp, not the dispatch timestamp.
+    } else {
+      // Check recovery each minute so a missed 10-minute dispatch does not
+      // wait for the next five-minute boundary. Dispatch remains throttled.
       ctx.waitUntil(recoverStaleDvcRentalBrowser(env, now));
     }
 
@@ -181,7 +182,7 @@ async function dispatchDvcRentalBrowser(env, now) {
 }
 
 // If GitHub accepted a dispatch but no completed browser scrape reached D1, retry
-// on the next five-minute recovery slot. Never retry faster than five minutes.
+// after twelve minutes without ingestion. Never retry faster than five minutes.
 async function recoverStaleDvcRentalBrowser(env, now) {
   const store = new Storage(env.DB);
   const health = await store.allHealth();
@@ -190,7 +191,7 @@ async function recoverStaleDvcRentalBrowser(env, now) {
   const lastIngest = Date.parse(ingest?.lastSuccessAt || "");
   const currentTime = Date.now();
   const lastDispatch = Date.parse(dispatch?.lastCheckedAt || "");
-  if (Number.isFinite(lastIngest) && currentTime - lastIngest < 15 * 60000) return { skipped: true, reason: "ingest-fresh" };
+  if (Number.isFinite(lastIngest) && currentTime - lastIngest < 12 * 60000) return { skipped: true, reason: "ingest-fresh" };
   if (Number.isFinite(lastDispatch) && currentTime - lastDispatch < 5 * 60000) return { skipped: true, reason: "recent-dispatch" };
   return dispatchDvcRentalBrowser(env, now);
 }
