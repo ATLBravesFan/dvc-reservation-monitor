@@ -8,7 +8,7 @@ Free-tier DVC confirmed-reservation monitoring built with Cloudflare Workers + D
 |---|---:|---|
 | DVC Rental Store under $201 | every minute | new + price changes below `$201/night` |
 | DVC Rental Store under $12/point | every minute | new + price changes below `$12/point` |
-| DVC Rental Store website backup | requested every 5 minutes; independent 5-minute GitHub cron fallback | new + price changes matching either fast Rental Store filter |
+| DVC Rental Store website backup | requested every 5 minutes; 15-minute GitHub cron fallback | new + price changes matching either fast Rental Store filter |
 | DVC Rental Store - All Reservations | every 10 minutes | all new reservations + price changes |
 | David's Vacation Rentals | every 5 minutes | `< $300/night` OR 1/2/3-bedroom `< $17/point`; new + price changes |
 | DVC-Rental direct primary | every 5 minutes | all newly listed confirmed reservations from structured `/deals` data |
