@@ -49,6 +49,12 @@ jobs:
           echo '=== snapshot membership ==='
           query "SELECT source,updated_at,instr(payload,'a0fVJ000004EhQzYAK')>0 AS ehqz,instr(payload,'a0fVJ000004EnJVYA0')>0 AS enjv,instr(payload,'a0fVJ000004EpbRYAS')>0 AS epbr FROM snapshots WHERE source IN ('rental-store-all','rental-store-fast','rental-store-website') ORDER BY source;"
 
+          echo '=== outbox drain executions around the miss ==='
+          query "SELECT source,started_at,finished_at,outcome,error FROM execution_history WHERE source='alert-outbox-drain' AND started_at>='2026-10-12T14:39:00Z' AND started_at<='2026-10-12T14:47:00Z' ORDER BY started_at;"
+
+          echo '=== all executions around the claim ==='
+          query "SELECT source,started_at,finished_at,outcome,error FROM execution_history WHERE started_at>='2026-10-12T14:40:50Z' AND started_at<='2026-10-12T14:42:00Z' ORDER BY started_at;"
+
           echo '=== email counter ==='
           query "SELECT day,emails_sent,updated_at FROM counters ORDER BY day DESC LIMIT 2;"
 
