@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check src/config.js && node --check src/bounded-fetch.js && node --check src/parsers.js && node --check src/dvc-rental-direct.js && node --check src/alert-outbox.js && node --check src/inventory-guard.js && node --check src/execution-lease.js && node --check src/storage.js && node --check src/index.js && node --check src/rare-finds.js && node --check src/worker.js && node --check scripts/browser-backups.mjs && node --check scripts/dvc-rental-browser.mjs && node --check scripts/deploy-github.mjs && node test/inventory-guard.mjs && node test/smoke.mjs && node test/rare-finds.mjs && node test/dvc-rental-direct.mjs && node --check scripts/watchdog.mjs && node test/alert-outbox.mjs && python3 test/d1-integration.py && node test/worker-delivery.mjs"
+    "check": "node --check src/config.js && node --check src/bounded-fetch.js && node --check src/parsers.js && node --check src/dvc-rental-direct.js && node --check src/alert-outbox.js && node --check src/inventory-guard.js && node --check src/execution-lease.js && node --check src/storage.js && node --check src/index.js && node --check src/rare-finds.js && node --check src/worker.js && node --check scripts/browser-backups.mjs && node --check scripts/dvc-rental-browser.mjs && node --check scripts/deploy-github.mjs && node test/inventory-guard.mjs && node test/smoke.mjs && node test/rare-finds.mjs && node test/dvc-rental-direct.mjs && node --check scripts/watchdog.mjs && node test/alert-outbox.mjs && node test/execution-lease.mjs && python3 test/d1-integration.py && node test/worker-delivery.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.55.0"
