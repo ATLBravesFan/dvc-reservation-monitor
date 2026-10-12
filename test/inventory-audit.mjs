@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import {compareInventory} from "../src/inventory-audit.js";
+const rows=[{id:"a",total:100},{id:"b",total:200},{id:"c",total:300}];
+const same=compareInventory(rows,[...rows].reverse());
+assert.equal(same.requiresReview,false);
+assert.equal(same.sharedCount,3);
+const missing=compareInventory(rows,[rows[0]]);
+assert.equal(missing.requiresReview,false,"small subset alone is not proof of failure");
+assert.deepEqual(missing.onlyPrimary,["b","c"]);
+const mismatch=compareInventory(rows,[{id:"x",total:200}]);
+assert.equal(mismatch.requiresReview,true);
+const changed=compareInventory(rows,[{id:"a",total:101},{id:"b",total:200},{id:"c",total:300}]);
+assert.deepEqual(changed.priceDifferences,["a"]);
+assert.equal(compareInventory([],rows).requiresReview,true);
+console.log("Inventory reconciliation tests passed");
