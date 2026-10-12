@@ -10,8 +10,8 @@ async function health(){
   return r.json();
 }
 const initial=await health();
-const expected={"dvc-shop":1,"davids":5,"rental-store-all":10,"dvc-rental-direct":5,"dvc-rental-dispatch":10,"rental-store-website-dispatch":5};
-const modes={"dvc-shop":"dvc-shop","davids":"davids","rental-store-all":"rental-store","dvc-rental-direct":"dvc-rental-direct","dvc-rental-dispatch":"dvc-rental-dispatch","rental-store-website-dispatch":"website-backup-dispatch"};
+const expected={"dvc-shop":3,"davids":8,"rental-store-all":12,"rental-store-website-dispatch":8};
+const modes={"dvc-shop":"dvc-shop","davids":"davids","rental-store-all":"rental-store","rental-store-website-dispatch":"website-backup-dispatch"};
 const jobs=[];
 for(const source of initial.health||[]){
   const interval=expected[source.source];if(!interval)continue;
@@ -21,7 +21,7 @@ for(const source of initial.health||[]){
 }
 console.log("Sources requiring recovery:",jobs.map(j=>j.source).join(", ")||"none");
 const failed=[];
-for(const job of jobs){
+await Promise.all(jobs.map(async job=>{
   try{
     const r=await fetch(base+"/run?mode="+encodeURIComponent(job.mode),{method:"POST",headers:{Authorization:"Bearer "+token},signal:timeout(45000)});
     const body=await r.text();
@@ -46,5 +46,5 @@ for(const job of jobs){
     if(!Number.isFinite(updated)||updated<=job.before)throw Error("Source health did not advance within 50 seconds; inspect source runner and health mapping");
     console.log("RECOVERED",job.source,entry.lastSuccessAt);
   }catch(e){console.error("FAILED",job.source,String(e));failed.push(job.source);}
-}
+}));
 if(failed.length)throw Error("Recovery failed for: "+failed.join(", "));
