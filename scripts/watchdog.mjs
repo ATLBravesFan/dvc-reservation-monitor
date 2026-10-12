@@ -33,10 +33,17 @@ for(const job of jobs){
       return Object.values(value).some(v=>v&&typeof v==="object"&&failedResult(v));
     }
     if(failedResult(result))throw Error("Recovery returned failure: "+body.slice(0,500));
-    const after=await health();
-    const entry=(after.health||[]).find(x=>x.source===job.source);
-    const updated=Date.parse(entry?.lastSuccessAt||"");
-    if(!Number.isFinite(updated)||updated<=job.before)throw Error("Source health did not advance after recovery");
+    // A successful /run response may queue a browser workflow rather than finish it.
+    // Do not declare immediate failure before the async job has had time to report.
+    let entry, updated;
+    for(let attempt=0;attempt<6;attempt++){
+      const after=await health();
+      entry=(after.health||[]).find(x=>x.source===job.source);
+      updated=Date.parse(entry?.lastSuccessAt||"");
+      if(Number.isFinite(updated)&&updated>job.before)break;
+      if(attempt<5)await new Promise(resolve=>setTimeout(resolve,10000));
+    }
+    if(!Number.isFinite(updated)||updated<=job.before)throw Error("Source health did not advance within 50 seconds; inspect source runner and health mapping");
     console.log("RECOVERED",job.source,entry.lastSuccessAt);
   }catch(e){console.error("FAILED",job.source,String(e));failed.push(job.source);}
 }
