@@ -34,6 +34,13 @@ export default {
     if (minute % 15 === 0) {
       ctx.waitUntil(runRareFinds(env, now));
     }
+
+    // Recover overdue HTTP sources even if GitHub scheduled Actions are delayed.
+    // Existing D1 source leases prevent concurrent checks from duplicating work.
+    if (minute % 5 === 2) {
+      ctx.waitUntil(recoverOverdueSources(env, now).catch(error =>
+        console.error("scheduled source recovery failed", error instanceof Error ? error.message : String(error))));
+    }
   },
 
   async fetch(request, env) {
@@ -194,4 +201,42 @@ async function recoverStaleDvcRentalBrowser(env, now) {
   if (Number.isFinite(lastIngest) && currentTime - lastIngest < 12 * 60000) return { skipped: true, reason: "ingest-fresh" };
   if (Number.isFinite(lastDispatch) && currentTime - lastDispatch < 5 * 60000) return { skipped: true, reason: "recent-dispatch" };
   return dispatchDvcRentalBrowser(env, now);
+}
+
+
+// Mirrors the existing watchdog's overdue policy. Browser dispatch acceptance
+// is not evidence of ingestion; the regular browser workflow remains intact.
+const RECOVERY_INTERVALS = {
+  "dvc-shop": [3, "dvc-shop"],
+  "davids": [8, "davids"],
+  "rental-store-all": [12, "rental-store-all"],
+  "rental-store-website-dispatch": [8, "website-backup-dispatch"],
+};
+
+async function recoverOverdueSources(env, now) {
+  const store = new Storage(env.DB);
+  return withLease(env.DB, "cloudflare-source-recovery", async () => {
+    const health = await store.allHealth();
+    const recovered = [];
+    for (const [source, [expectedMinutes, mode]] of Object.entries(RECOVERY_INTERVALS)) {
+      const row = health.find(item => item.source === source);
+      const last = Date.parse(row?.lastSuccessAt || "");
+      if (Number.isFinite(last) && now.getTime() - last < (expectedMinutes + 10) * 60000) continue;
+      try {
+        if (!env.ADMIN_TOKEN) throw new Error("ADMIN_TOKEN missing");
+        const response = await baseWorker.fetch(new Request(`https://dvc-monitor.internal/run?mode=${mode}`, {
+          method: "POST", headers: { Authorization: `Bearer ${env.ADMIN_TOKEN}` },
+        }), env);
+        const result = await response.json();
+        if (!response.ok || JSON.stringify(result).includes('"ok":false')) {
+          throw new Error(`Recovery ${mode} failed: ${JSON.stringify(result).slice(0,350)}`);
+        }
+        recovered.push(source);
+      } catch (error) {
+        console.error("source recovery failed", source, error instanceof Error ? error.message : String(error));
+      }
+    }
+    await store.putMeta("cloudflare-source-recovery", { checkedAt: new Date().toISOString(), recovered });
+    return { recovered };
+  });
 }
