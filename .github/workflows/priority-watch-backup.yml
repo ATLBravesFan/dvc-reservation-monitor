@@ -1,0 +1,28 @@
+name: DVC priority watch backup
+
+on:
+  schedule:
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dvc-priority-watch-backup
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Recover overdue priority watches
+        run: node scripts/priority-backup.mjs
+        env:
+          DVC_MONITOR_BASE_URL: ${{ secrets.DVC_MONITOR_BASE_URL }}
+          DVC_MONITOR_ADMIN_TOKEN: ${{ secrets.DVC_MONITOR_ADMIN_TOKEN }}
