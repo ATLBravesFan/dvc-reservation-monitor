@@ -187,8 +187,9 @@ async function recoverStaleDvcRentalBrowser(env, now) {
   const ingest = health.find(row => row.source === "dvc-rental");
   const dispatch = health.find(row => row.source === "dvc-rental-dispatch");
   const lastIngest = Date.parse(ingest?.lastSuccessAt || "");
+  const currentTime = Date.now();
   const lastDispatch = Date.parse(dispatch?.lastCheckedAt || "");
-  if (Number.isFinite(lastIngest) && now.getTime() - lastIngest < 15 * 60000) return { skipped: true, reason: "ingest-fresh" };
-  if (Number.isFinite(lastDispatch) && now.getTime() - lastDispatch < 5 * 60000) return { skipped: true, reason: "recent-dispatch" };
+  if (Number.isFinite(lastIngest) && currentTime - lastIngest < 15 * 60000) return { skipped: true, reason: "ingest-fresh" };
+  if (Number.isFinite(lastDispatch) && currentTime - lastDispatch < 5 * 60000) return { skipped: true, reason: "recent-dispatch" };
   return dispatchDvcRentalBrowser(env, now);
 }
