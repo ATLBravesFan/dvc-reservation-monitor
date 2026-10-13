@@ -39,18 +39,20 @@ jobs:
         shell: bash
         run: |
           # DVC Rental Store intermittently returns Cloudflare 520s or a partial
-          # page to GitHub-hosted browsers. Retry once with a fresh browser before
-          # declaring the backup unhealthy. The scraper itself refuses to ingest
-          # zero/incomplete inventory, so a bad page can never replace good state.
-          for attempt in 1 2; do
-            echo "Rental Store browser attempt $attempt of 2"
+          # page to GitHub-hosted browsers. Try three times with a fresh browser,
+          # separated by short pauses. This suppresses a one-off transient failure
+          # while still failing the workflow within a few minutes if the site stays
+          # unhealthy, so GitHub can notify promptly. The scraper itself refuses to
+          # ingest zero/incomplete inventory, so a bad page can never replace good state.
+          for attempt in 1 2 3; do
+            echo "Rental Store browser attempt $attempt of 3"
             if node scripts/browser-backups.mjs; then
               exit 0
             fi
-            if [ "$attempt" -lt 2 ]; then
+            if [ "$attempt" -lt 3 ]; then
               echo "Transient browser failure; waiting 15 seconds before retry."
               sleep 15
             fi
           done
-          echo "Rental Store browser backup failed both attempts."
+          echo "Rental Store browser backup failed all three attempts."
           exit 1
