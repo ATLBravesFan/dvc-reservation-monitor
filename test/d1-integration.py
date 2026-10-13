@@ -3,13 +3,24 @@ import sqlite3
 from pathlib import Path
 
 db=sqlite3.connect(":memory:")
-for name in ("0001_init.sql","0002_reliability.sql"):
-    db.executescript((Path("migrations")/name).read_text())
-# Ensure migration is idempotent and does not wipe existing state.
+migrations=sorted(Path("migrations").glob("*.sql"))
+for migration in migrations:
+    db.executescript(migration.read_text())
+# Ensure migrations are idempotent and do not wipe existing state.
 db.execute("INSERT INTO snapshots VALUES ('existing','{}','2026-10-11')")
-for name in ("0001_init.sql","0002_reliability.sql"):
-    db.executescript((Path("migrations")/name).read_text())
+for migration in migrations:
+    db.executescript(migration.read_text())
 assert db.execute("SELECT payload FROM snapshots WHERE source='existing'").fetchone()[0]=="{}"
+
+# The hot lease-reconciliation UPDATE must use the composite index rather than
+# scanning every historical execution for a source on each one-minute check.
+plan=db.execute("""EXPLAIN QUERY PLAN
+ UPDATE execution_history SET finished_at=?, outcome='interrupted'
+ WHERE source=? AND outcome='running' AND started_at < ?""",
+ ("2026-10-13T12:00:00Z","dvc-shop","2026-10-13T11:58:30Z")).fetchall()
+plan_text=" ".join(str(row) for row in plan)
+assert "idx_execution_history_source_outcome_started" in plan_text, plan_text
+
 insert="""INSERT OR IGNORE INTO alert_outbox
  (alert_key,source,listing_id,payload,status,attempts,created_at,updated_at,title,show_matches,priority)
  VALUES(?,?,?,?,'pending',0,?,?,?,?,?)"""
@@ -30,4 +41,4 @@ db.execute("""UPDATE alert_outbox SET status='uncertain',last_error='Delivery le
  lease_until=NULL,updated_at=? WHERE status='sending' AND lease_until<=?""",("2026-10-11T21:02:00Z","2026-10-11T21:02:00Z"))
 assert db.execute("SELECT status FROM alert_outbox WHERE alert_key='k2'").fetchone()[0]=="uncertain"
 assert db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]==1
-print("Real SQLite migration and outbox SQL integration tests passed")
+print("Real SQLite migration, D1 index and outbox SQL integration tests passed")
