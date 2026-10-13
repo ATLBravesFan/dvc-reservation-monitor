@@ -4,7 +4,14 @@ export async function acquireLease(db, source, ttlSeconds=90) {
   const token=crypto.randomUUID();
   const now=new Date();
   const expires=new Date(now.getTime()+ttlSeconds*1000).toISOString();
-  // Reconcile executions abandoned by a terminated Worker before taking a new lease.\n  // Only executions older than the lease TTL are eligible; never rewrite completed runs.\n  await db.prepare(`\n    UPDATE execution_history SET finished_at=?, outcome='interrupted',\n      error='Execution did not finalize before its lease expired'\n    WHERE source=? AND outcome='running' AND started_at < ?\n  `).bind(now.toISOString(),source,new Date(now.getTime()-ttlSeconds*1000).toISOString()).run();\n  const result=await db.prepare(`
+  // Reconcile executions abandoned by a terminated Worker before taking a new lease.
+  // Only executions older than the lease TTL are eligible; never rewrite completed runs.
+  await db.prepare(`
+    UPDATE execution_history SET finished_at=?, outcome='interrupted',
+      error='Execution did not finalize before its lease expired'
+    WHERE source=? AND outcome='running' AND started_at < ?
+  `).bind(now.toISOString(),source,new Date(now.getTime()-ttlSeconds*1000).toISOString()).run();
+  const result=await db.prepare(`
     INSERT INTO execution_leases(source,token,acquired_at,expires_at)
     VALUES(?,?,?,?)
     ON CONFLICT(source) DO UPDATE SET token=excluded.token,
