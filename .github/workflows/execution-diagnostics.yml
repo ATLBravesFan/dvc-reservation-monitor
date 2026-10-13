@@ -9,29 +9,44 @@ permissions:
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
-      - name: Read Cloudflare D1 execution evidence
+      - name: Read D1 directly through Cloudflare API
         env:
-          BASE: ${{ secrets.DVC_MONITOR_BASE_URL }}
-          TOKEN: ${{ secrets.DVC_MONITOR_ADMIN_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           python3 - <<'PY'
-          import json,os,urllib.request,datetime
-          url=os.environ['BASE'].rstrip('/')+'/diagnostics/executions'
-          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['TOKEN']})
-          with urllib.request.urlopen(req,timeout=20) as r:
-              data=json.load(r)
-          now=datetime.datetime.fromisoformat(data['checkedAt'].replace('Z','+00:00'))
-          print('Checked at:',data['checkedAt'])
-          for row in data['health']:
-              last=row.get('lastSuccessAt')
-              age='unknown'
-              if last:
-                  age=round((now-datetime.datetime.fromisoformat(last.replace('Z','+00:00'))).total_seconds()/60,1)
-              print('HEALTH',row['source'],'last_success',last,'age_minutes',age,'failures',row.get('consecutiveFailures'),'error',row.get('lastError'))
-          for row in data['leases']:
-              print('LEASE',json.dumps(row))
-          for row in data['history']:
-              print('EXECUTION',json.dumps(row))
+          import json,os,urllib.request,urllib.error,datetime
+          account=os.environ['CF_ACCOUNT']
+          root=f'https://api.cloudflare.com/client/v4/accounts/{account}/d1/database'
+          headers={'Authorization':'Bearer '+os.environ['CF_TOKEN'],'Content-Type':'application/json'}
+          def call(url,payload=None):
+              req=urllib.request.Request(url,headers=headers,data=json.dumps(payload).encode() if payload else None,method='POST' if payload else 'GET')
+              try:
+                  with urllib.request.urlopen(req,timeout=25) as response:
+                      result=json.load(response)
+              except urllib.error.HTTPError as error:
+                  raise RuntimeError(f'Cloudflare API HTTP {error.code}: {error.read(500).decode(errors="replace")}')
+              if not result.get('success'): raise RuntimeError('Cloudflare API error: '+str(result.get('errors')))
+              return result['result']
+          databases=call(root)
+          if isinstance(databases,dict): databases=databases.get('results',[])
+          database=next((d for d in databases if d.get('name')=='dvc-monitor-state'),None)
+          if not database: raise RuntimeError('D1 database dvc-monitor-state not found')
+          dburl=root+'/'+database['uuid']+'/query'
+          queries={
+            'HEALTH':"SELECT source,last_checked_at,last_success_at,consecutive_failures,last_error FROM health WHERE source IN ('dvc-shop','davids','rental-store-api')",
+            'LEASES':"SELECT source,acquired_at,expires_at FROM execution_leases WHERE source IN ('dvc-shop','davids','rental-store-api') ORDER BY source",
+            'EXECUTIONS':"SELECT source,started_at,finished_at,outcome,error FROM execution_history WHERE source IN ('dvc-shop','davids','rental-store-api') ORDER BY started_at DESC LIMIT 90"
+          }
+          for label,sql in queries.items():
+              try:
+                  result=call(dburl,{'sql':sql})
+                  rows=result[0].get('results',[]) if isinstance(result,list) else result.get('results',[])
+                  print(label,'rows',len(rows))
+                  for row in rows: print(label,json.dumps(row))
+              except Exception as error:
+                  print(label,'QUERY ERROR',str(error))
+                  raise
           PY
