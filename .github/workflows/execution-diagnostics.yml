@@ -1,0 +1,37 @@
+name: DVC execution diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Read Cloudflare D1 execution evidence
+        env:
+          BASE: ${{ secrets.DVC_MONITOR_BASE_URL }}
+          TOKEN: ${{ secrets.DVC_MONITOR_ADMIN_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json,os,urllib.request,datetime
+          url=os.environ['BASE'].rstrip('/')+'/diagnostics/executions'
+          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['TOKEN']})
+          with urllib.request.urlopen(req,timeout=20) as r:
+              data=json.load(r)
+          now=datetime.datetime.fromisoformat(data['checkedAt'].replace('Z','+00:00'))
+          print('Checked at:',data['checkedAt'])
+          for row in data['health']:
+              last=row.get('lastSuccessAt')
+              age='unknown'
+              if last:
+                  age=round((now-datetime.datetime.fromisoformat(last.replace('Z','+00:00'))).total_seconds()/60,1)
+              print('HEALTH',row['source'],'last_success',last,'age_minutes',age,'failures',row.get('consecutiveFailures'),'error',row.get('lastError'))
+          for row in data['leases']:
+              print('LEASE',json.dumps(row))
+          for row in data['history']:
+              print('EXECUTION',json.dumps(row))
+          PY
