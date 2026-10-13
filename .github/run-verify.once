@@ -2,3 +2,4 @@ Verify the deployed one-minute DVC Shop cadence, D1 health/freshness, DVC-Rental
 Verify Cloudflare Queue scheduler is driving the live DVC watches after the 2026-10-13 free-tier CPU redesign.
 Recheck Queue-driven one-minute cadence after old pre-deploy leases have expired.
 Audit Queue-driven execution history and alert outbox after stabilization.
+Audit uncertain and pending outbox rows against Brevo delivery records before cleanup.
