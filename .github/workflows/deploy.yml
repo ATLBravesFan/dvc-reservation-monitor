@@ -26,6 +26,17 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Validate monitor
         run: npm run check
+      - name: Ensure Cloudflare Queue exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if npx --no-install wrangler queues info dvc-monitor-ticks; then
+            echo "Using existing dvc-monitor-ticks Queue."
+          else
+            echo "Queue does not exist yet; creating dvc-monitor-ticks."
+            npx --no-install wrangler queues create dvc-monitor-ticks
+          fi
       - name: Provision D1, apply migrations, deploy Worker and secrets
         run: node scripts/deploy-github.mjs
         env:
