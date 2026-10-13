@@ -4,3 +4,4 @@ Deploy independent 10-minute Rental Store scheduling; validate existing suite. 2
 Deploy Rental Store website backup all-reservation alerts and richer duplicate merging. 2026-10-12.
 Deploy one-retry recovery for abandoned email delivery claims. 2026-10-12.
 Deploy Cloudflare Queue scheduler to move DVC polling off the 10 ms cron CPU limit while preserving existing watch intervals. 2026-10-13.
+Redeploy Queue scheduler using Cloudflare Free default Queue consumer CPU budget. 2026-10-13.
