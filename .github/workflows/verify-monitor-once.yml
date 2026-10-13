@@ -23,8 +23,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           DVC_MONITOR_BASE_URL: ${{ secrets.DVC_MONITOR_BASE_URL }}
-          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
         run: |
           node --input-type=module <<'NODE'
           import { URLS } from './src/config.js';
@@ -72,77 +70,8 @@ jobs:
           console.log('D1_SNAPSHOTS=' + JSON.stringify(snapshotRows, null, 2));
           const outboxCounts = await query(`SELECT status, COUNT(*) AS count FROM alert_outbox GROUP BY status ORDER BY status`);
           console.log('OUTBOX_COUNTS=' + JSON.stringify(outboxCounts, null, 2));
-          const problemRows = await query(`SELECT alert_key, source, listing_id, status, attempts, created_at, updated_at, next_attempt_at, last_error, title, priority, payload FROM alert_outbox WHERE status IN ('pending','uncertain') ORDER BY created_at`);
-          const problemSummary = problemRows.map(row => {
-            let event = null;
-            try { event = JSON.parse(row.payload); } catch {}
-            return {
-              alert_key: row.alert_key,
-              source: row.source,
-              listing_id: row.listing_id,
-              status: row.status,
-              attempts: row.attempts,
-              created_at: row.created_at,
-              updated_at: row.updated_at,
-              next_attempt_at: row.next_attempt_at,
-              last_error: row.last_error,
-              title: row.title,
-              priority: row.priority,
-              event_type: event?.type || null,
-              resort: event?.listing?.resort || event?.listing?.resortName || null,
-              room: event?.listing?.roomType || event?.listing?.room || null,
-              check_in: event?.listing?.checkIn || null,
-              check_out: event?.listing?.checkOut || null,
-              total: event?.listing?.total ?? null,
-              nightly: event?.listing?.nightly ?? null,
-              points: event?.listing?.points ?? null,
-              price_per_point: event?.listing?.pricePerPoint ?? null,
-            };
-          });
-          console.log('PROBLEM_OUTBOX=' + JSON.stringify(problemSummary, null, 2));
-
-          if (process.env.BREVO_API_KEY && process.env.EMAIL_TO && problemRows.some(row => row.status === 'uncertain')) {
-            const today = new Date().toISOString().slice(0,10);
-            const u = new URL('https://api.brevo.com/v3/smtp/emails');
-            u.searchParams.set('email', process.env.EMAIL_TO);
-            u.searchParams.set('startDate', today);
-            u.searchParams.set('endDate', today);
-            u.searchParams.set('sort', 'desc');
-            u.searchParams.set('limit', '1000');
-            const r = await fetch(u, { headers: { Accept: 'application/json', 'api-key': process.env.BREVO_API_KEY } });
-            const body = await r.json();
-            if (!r.ok) throw new Error(`Brevo transactional email lookup failed ${r.status}: ${JSON.stringify(body).slice(0,500)}`);
-            const emails = (body.transactionalEmails || []).map(x => ({ date:x.date, messageId:x.messageId, subject:x.subject, uuid:x.uuid }));
-            console.log('BREVO_EMAILS_TODAY=' + JSON.stringify(emails, null, 2));
-
-            const uncertainRows = problemRows.filter(row => row.status === 'uncertain');
-            const matched = [];
-            for (const row of uncertainRows) {
-              const t = Date.parse(row.updated_at || row.created_at || '');
-              const candidates = emails.filter(x => Number.isFinite(t) && Math.abs(Date.parse(x.date) - t) <= 5*60*1000);
-              matched.push({ alert_key: row.alert_key, listing_id: row.listing_id, updated_at: row.updated_at, candidates });
-            }
-            console.log('UNCERTAIN_BREVO_MATCHES=' + JSON.stringify(matched, null, 2));
-
-            const ids = [...new Set(matched.flatMap(x => x.candidates.map(c => c.messageId)).filter(Boolean))];
-            const delivery = [];
-            for (const messageId of ids) {
-              const eu = new URL('https://api.brevo.com/v3/smtp/statistics/events');
-              eu.searchParams.set('messageId', messageId);
-              eu.searchParams.set('days', '1');
-              eu.searchParams.set('limit', '100');
-              eu.searchParams.set('sort', 'asc');
-              const er = await fetch(eu, { headers: { Accept: 'application/json', 'api-key': process.env.BREVO_API_KEY } });
-              const eb = await er.json();
-              delivery.push({ messageId, ok: er.ok, events: (eb.events || []).map(e => ({ date:e.date, event:e.event, reason:e.reason || null, tag:e.tag || null })) });
-            }
-            console.log('BREVO_MATCHED_DELIVERY_EVENTS=' + JSON.stringify(delivery, null, 2));
-          }
-
           const recentExecutions = await query(`SELECT source, started_at, finished_at, outcome, error FROM execution_history WHERE julianday(started_at) >= julianday('now','-10 minutes') ORDER BY started_at DESC LIMIT 100`);
           console.log('RECENT_EXECUTIONS=' + JSON.stringify(recentExecutions, null, 2));
-          const alertCounts = await query(`SELECT source, COUNT(*) AS sent_count, MIN(sent_at) AS first_sent, MAX(sent_at) AS last_sent FROM alerts WHERE status='sent' AND sent_at >= datetime('now','-2 hours') GROUP BY source ORDER BY source`);
-          console.log('RECENT_ALERT_COUNTS=' + JSON.stringify(alertCounts, null, 2));
 
           const snapshotResult = await query(`SELECT payload, updated_at FROM snapshots WHERE source='rental-store-all'`);
           if (!snapshotResult[0]?.payload) throw new Error('rental-store-all snapshot missing');
