@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - ".github/run-outbox-audit.once"
+      - ".github/run-verify.once"
 
 permissions:
   contents: read
