@@ -40,6 +40,7 @@ jobs:
             cron: health.cron,
             checkedAt: health.checkedAt,
             emailUsageToday: health.emailUsageToday,
+            alertOutbox: health.alertOutbox,
             health: health.health,
           }, null, 2));
 
@@ -67,6 +68,10 @@ jobs:
           console.log('D1_SOURCE_HEALTH=' + JSON.stringify(sourceRows, null, 2));
           const snapshotRows = await query(`SELECT source, updated_at FROM snapshots ORDER BY source`);
           console.log('D1_SNAPSHOTS=' + JSON.stringify(snapshotRows, null, 2));
+          const outboxCounts = await query(`SELECT status, COUNT(*) AS count FROM alert_outbox GROUP BY status ORDER BY status`);
+          console.log('OUTBOX_COUNTS=' + JSON.stringify(outboxCounts, null, 2));
+          const recentExecutions = await query(`SELECT source, started_at, finished_at, outcome, error FROM execution_history WHERE julianday(started_at) >= julianday('now','-10 minutes') ORDER BY started_at DESC LIMIT 100`);
+          console.log('RECENT_EXECUTIONS=' + JSON.stringify(recentExecutions, null, 2));
           const alertCounts = await query(`SELECT source, COUNT(*) AS sent_count, MIN(sent_at) AS first_sent, MAX(sent_at) AS last_sent FROM alerts WHERE status='sent' AND sent_at >= datetime('now','-2 hours') GROUP BY source ORDER BY source`);
           console.log('RECENT_ALERT_COUNTS=' + JSON.stringify(alertCounts, null, 2));
 
