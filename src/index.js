@@ -22,6 +22,19 @@ export default {
       return statusResponse(env, store, url.pathname === "/");
     }
 
+    if (url.pathname === "/diagnostics/executions" && request.method === "GET") {
+      if (!authorized(request, env.ADMIN_TOKEN)) return new Response("Unauthorized", { status: 401 });
+      const sources = ["dvc-shop", "davids", "rental-store-api"];
+      const leases = (await env.DB.prepare(
+        "SELECT source,acquired_at,expires_at FROM execution_leases WHERE source IN ('dvc-shop','davids','rental-store-api') ORDER BY source"
+      ).all()).results || [];
+      const history = (await env.DB.prepare(
+        "SELECT source,started_at,finished_at,outcome,error FROM execution_history WHERE source IN ('dvc-shop','davids','rental-store-api') ORDER BY started_at DESC LIMIT 90"
+      ).all()).results || [];
+      const health = (await store.allHealth()).filter(row => sources.includes(row.source));
+      return json({ checkedAt: new Date().toISOString(), health, leases, history });
+    }
+
     if (url.pathname === "/run" && request.method === "POST") {
       if (!authorized(request, env.ADMIN_TOKEN)) return new Response("Unauthorized", { status: 401 });
       const mode = url.searchParams.get("mode") || "all";
