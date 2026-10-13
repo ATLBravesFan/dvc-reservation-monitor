@@ -1,1 +1,2 @@
 Verify the deployed one-minute DVC Shop cadence, D1 health/freshness, DVC-Rental direct primary health, browser fallback health, and current snapshots after the latest deployment.
+Verify Cloudflare Queue scheduler is driving the live DVC watches after the 2026-10-13 free-tier CPU redesign.
