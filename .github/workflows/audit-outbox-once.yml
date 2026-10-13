@@ -1,0 +1,78 @@
+name: Audit DVC alert outbox
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/run-outbox-audit.once"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Audit uncertain outbox rows against Brevo
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: |
+          node --input-type=module <<'NODE'
+          const required=['CLOUDFLARE_API_TOKEN','CLOUDFLARE_ACCOUNT_ID','BREVO_API_KEY','EMAIL_TO'];
+          for(const k of required) if(!process.env[k]) throw new Error(`${k} missing`);
+          const account=process.env.CLOUDFLARE_ACCOUNT_ID;
+          const cfHeaders={Authorization:`Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,'Content-Type':'application/json'};
+          const dbList=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database?name=dvc-monitor-state&per_page=100`,{headers:cfHeaders});
+          const dbBody=await dbList.json();
+          const db=(dbBody.result||[]).find(x=>x.name==='dvc-monitor-state');
+          if(!db?.uuid) throw new Error('dvc-monitor-state not found');
+          async function query(sql,params=[]){
+            const r=await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${db.uuid}/query`,{method:'POST',headers:cfHeaders,body:JSON.stringify({sql,params})});
+            const b=await r.json();
+            if(!r.ok||!b.success) throw new Error(`D1 query failed: ${JSON.stringify(b.errors||b)}`);
+            return b.result?.[0]?.results||[];
+          }
+          const rows=await query(`SELECT alert_key,source,listing_id,status,attempts,created_at,updated_at,next_attempt_at,last_error,title,priority,payload FROM alert_outbox WHERE status IN ('pending','uncertain') ORDER BY created_at`);
+          const summary=rows.map(r=>{let e=null;try{e=JSON.parse(r.payload)}catch{} return {...r,payload:undefined,event_type:e?.type||null,resort:e?.listing?.resort||e?.listing?.resortName||null,room:e?.listing?.roomType||e?.listing?.room||null,check_in:e?.listing?.checkIn||null,check_out:e?.listing?.checkOut||null,total:e?.listing?.total??null};});
+          console.log('PROBLEM_OUTBOX='+JSON.stringify(summary,null,2));
+          const uncertain=rows.filter(r=>r.status==='uncertain');
+          if(!uncertain.length){console.log('NO_UNCERTAIN_ROWS');process.exit(0);}
+          const startDate=new Date(Math.min(...uncertain.map(r=>Date.parse(r.created_at)))).toISOString().slice(0,10);
+          const endDate=new Date().toISOString().slice(0,10);
+          const u=new URL('https://api.brevo.com/v3/smtp/emails');
+          u.searchParams.set('email',process.env.EMAIL_TO);
+          u.searchParams.set('startDate',startDate);
+          u.searchParams.set('endDate',endDate);
+          u.searchParams.set('sort','asc');
+          u.searchParams.set('limit','1000');
+          const br=await fetch(u,{headers:{Accept:'application/json','api-key':process.env.BREVO_API_KEY}});
+          const bb=await br.json();
+          if(!br.ok) throw new Error(`Brevo lookup failed ${br.status}: ${JSON.stringify(bb).slice(0,500)}`);
+          const emails=(bb.transactionalEmails||[]).map(x=>({date:x.date,messageId:x.messageId,subject:x.subject,uuid:x.uuid}));
+          console.log('BREVO_RANGE='+JSON.stringify({startDate,endDate,count:emails.length},null,2));
+          const matches=[];
+          for(const r of uncertain){
+            const created=Date.parse(r.created_at),updated=Date.parse(r.updated_at);
+            const candidates=emails.filter(x=>{
+              const t=Date.parse(x.date);
+              const near=(Number.isFinite(created)&&Math.abs(t-created)<=20*60*1000)||(Number.isFinite(updated)&&Math.abs(t-updated)<=20*60*1000);
+              return near && String(x.subject||'').startsWith(r.title||'');
+            });
+            matches.push({alert_key:r.alert_key,listing_id:r.listing_id,created_at:r.created_at,updated_at:r.updated_at,candidates});
+          }
+          console.log('UNCERTAIN_BREVO_MATCHES='+JSON.stringify(matches,null,2));
+          const ids=[...new Set(matches.flatMap(m=>m.candidates.map(c=>c.messageId)).filter(Boolean))];
+          const delivery=[];
+          for(const id of ids){
+            const eu=new URL('https://api.brevo.com/v3/smtp/statistics/events');
+            eu.searchParams.set('messageId',id);eu.searchParams.set('startDate',startDate);eu.searchParams.set('endDate',endDate);eu.searchParams.set('limit','100');eu.searchParams.set('sort','asc');
+            const er=await fetch(eu,{headers:{Accept:'application/json','api-key':process.env.BREVO_API_KEY}});
+            const eb=await er.json();
+            delivery.push({messageId:id,ok:er.ok,events:(eb.events||[]).map(e=>({date:e.date,event:e.event,reason:e.reason||null,tag:e.tag||null}))});
+          }
+          console.log('BREVO_DELIVERY_EVENTS='+JSON.stringify(delivery,null,2));
+          NODE
