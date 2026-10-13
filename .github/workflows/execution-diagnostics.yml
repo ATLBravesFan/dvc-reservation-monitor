@@ -36,7 +36,7 @@ jobs:
           if not database: raise RuntimeError('D1 database dvc-monitor-state not found')
           dburl=root+'/'+database['uuid']+'/query'
           queries={
-            'HEALTH':"SELECT source,last_checked_at,last_success_at,consecutive_failures,last_error FROM source_health WHERE source IN ('dvc-shop','davids','rental-store-api')",
+            'HEALTH':"SELECT source,last_checked_at,last_success_at,consecutive_failures,last_error FROM health WHERE source IN ('dvc-shop','davids','rental-store-api')",
             'LEASES':"SELECT source,acquired_at,expires_at FROM execution_leases WHERE source IN ('dvc-shop','davids','rental-store-api') ORDER BY source",
             'EXECUTIONS':"SELECT source,started_at,finished_at,outcome,error FROM execution_history WHERE source IN ('dvc-shop','davids','rental-store-api') ORDER BY started_at DESC LIMIT 90"
           }
