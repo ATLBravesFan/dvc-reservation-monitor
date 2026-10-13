@@ -4,3 +4,4 @@ Recheck Queue-driven one-minute cadence after old pre-deploy leases have expired
 Audit Queue-driven execution history and alert outbox after stabilization.
 Audit uncertain and pending outbox rows against Brevo delivery records before cleanup.
 Run date-range Brevo correlation for uncertain DVC alert rows.
+Reconcile the three Brevo-confirmed uncertain DVC-Rental alerts without resending them.
