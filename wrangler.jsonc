@@ -1,10 +1,32 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "dvc-reservation-monitor",
-  "main": "src/worker.js",
+  "main": "src/queue-entry.js",
   "compatibility_date": "2026-10-10",
   "triggers": {
     "crons": ["* * * * *"]
+  },
+  "limits": {
+    "cpu_ms": 300000
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "DVC_TICK_QUEUE",
+        "queue": "dvc-monitor-ticks"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "dvc-monitor-ticks",
+        "max_batch_size": 1,
+        "max_batch_timeout": 0,
+        "max_retries": 5,
+        "retry_delay": 5,
+        "max_concurrency": 1,
+        "dead_letter_queue": "dvc-monitor-ticks-dlq"
+      }
+    ]
   },
   "d1_databases": [
     {
