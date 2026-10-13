@@ -3,3 +3,4 @@ Verify Cloudflare Queue scheduler is driving the live DVC watches after the 2026
 Recheck Queue-driven one-minute cadence after old pre-deploy leases have expired.
 Audit Queue-driven execution history and alert outbox after stabilization.
 Audit uncertain and pending outbox rows against Brevo delivery records before cleanup.
+Run date-range Brevo correlation for uncertain DVC alert rows.
