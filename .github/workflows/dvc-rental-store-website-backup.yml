@@ -44,6 +44,7 @@ jobs:
           # while still failing the workflow within a few minutes if the site stays
           # unhealthy, so GitHub can notify promptly. The scraper itself refuses to
           # ingest zero/incomplete inventory, so a bad page can never replace good state.
+          set -o pipefail
           log_file="$(mktemp)"
           for attempt in 1 2 3; do
             echo "Rental Store browser attempt $attempt of 3"
