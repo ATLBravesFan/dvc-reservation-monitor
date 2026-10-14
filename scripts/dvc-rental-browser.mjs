@@ -6,6 +6,8 @@ const TOKEN = process.env.DVC_MONITOR_INGEST_TOKEN;
 const CHROME = process.env.CHROME_PATH || "/usr/bin/google-chrome";
 const DEALS_URL = "https://dvc-rental.com/deals";
 const DETAIL_CONCURRENCY = 4;
+const INGEST_LEASE_RETRY_DELAY_MS = 15000;
+const INGEST_LEASE_MAX_ATTEMPTS = 8;
 
 if (!BASE_URL || !TOKEN) throw new Error("DVC_MONITOR_BASE_URL and DVC_MONITOR_INGEST_TOKEN are required");
 
@@ -202,17 +204,42 @@ function isCompleteReservation(row) {
 
 async function ingest(listings) {
   const url = new URL("/ingest/dvc-rental", BASE_URL).toString();
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ listings }),
-  });
-  const body = await response.text();
-  if (!response.ok) throw new Error(`DVC-Rental ingest failed ${response.status}: ${body.slice(0, 500)}`);
-  console.log(`DVC-Rental ingest: ${body.slice(0, 1000)}`);
+
+  for (let attempt = 1; attempt <= INGEST_LEASE_MAX_ATTEMPTS; attempt += 1) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ listings }),
+    });
+    const body = await response.text();
+
+    if (response.ok) {
+      console.log(`DVC-Rental ingest: ${body.slice(0, 1000)}`);
+      return;
+    }
+
+    const leaseBusy = response.status === 409 && /"reason"\s*:\s*"already-running"/i.test(body);
+    if (!leaseBusy) {
+      throw new Error(`DVC-Rental ingest failed ${response.status}: ${body.slice(0, 500)}`);
+    }
+
+    if (attempt === INGEST_LEASE_MAX_ATTEMPTS) {
+      throw new Error(`DVC-Rental ingest stayed busy after ${INGEST_LEASE_MAX_ATTEMPTS} attempts: ${body.slice(0, 500)}`);
+    }
+
+    console.warn(
+      `DVC-Rental ingest lease is busy; preserving this ${listings.length}-reservation snapshot and retrying in ` +
+      `${INGEST_LEASE_RETRY_DELAY_MS / 1000}s (attempt ${attempt}/${INGEST_LEASE_MAX_ATTEMPTS}).`,
+    );
+    await sleep(INGEST_LEASE_RETRY_DELAY_MS);
+  }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function dedupe(rows) {
