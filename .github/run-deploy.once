@@ -7,3 +7,4 @@ Deploy Cloudflare Queue scheduler to move DVC polling off the 10 ms cron CPU lim
 Redeploy Queue scheduler using Cloudflare Free default Queue consumer CPU budget. 2026-10-13.
 Deploy D1 execution-history composite indexes to reduce free-tier rows_read scans. 2026-10-13.
 Deploy daily 14-day execution-history retention cleanup in the Queue consumer. 2026-10-13.
+Deploy DVC Shop five-minute cadence policy. 2026-10-14.
