@@ -3,6 +3,9 @@
   "name": "dvc-reservation-monitor",
   "main": "src/queue-entry.js",
   "compatibility_date": "2026-10-10",
+  "limits": {
+    "cpu_ms": 30000
+  },
   "triggers": {
     "crons": ["* * * * *"]
   },
