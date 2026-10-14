@@ -24,6 +24,8 @@ jobs:
           node-version: "22"
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+      - name: Apply production cadence policy
+        run: node scripts/apply-runtime-cadences.mjs
       - name: Validate monitor
         run: npm run check
       - name: Ensure Cloudflare Queue exists
