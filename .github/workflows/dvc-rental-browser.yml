@@ -30,4 +30,4 @@ jobs:
           DVC_MONITOR_BASE_URL: ${{ secrets.DVC_MONITOR_BASE_URL }}
           DVC_MONITOR_INGEST_TOKEN: ${{ secrets.DVC_MONITOR_INGEST_TOKEN }}
           CHROME_PATH: /usr/bin/google-chrome
-        run: node scripts/dvc-rental-browser.mjs
+        run: node --import ./scripts/ingest-fetch-retry.mjs scripts/dvc-rental-browser.mjs
