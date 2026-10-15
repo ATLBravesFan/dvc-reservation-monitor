@@ -2,6 +2,7 @@ import { boundedFetch } from "./bounded-fetch.js";
 import { EMAIL_LIMITS, URLS, WATCHES } from "./config.js";
 import { byId, formatListing } from "./parsers.js";
 import { Storage, utcDay } from "./storage.js";
+import { withLease } from "./execution-lease.js";
 
 const SOURCE_KEY = "dvcreservations-rare-finds";
 
@@ -61,6 +62,7 @@ export function parseRareFinds(html, now = new Date()) {
 }
 
 export async function runRareFinds(env, now = new Date()) {
+  return withLease(env.DB, SOURCE_KEY, async () => {
   const store = new Storage(env.DB);
   try {
     const response = await boundedFetch(URLS.rareFindsList, {
@@ -102,6 +104,7 @@ export async function runRareFinds(env, now = new Date()) {
     }
     throw error;
   }
+  });
 }
 
 async function processRareFinds(env, store, rows) {
