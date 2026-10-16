@@ -1,4 +1,5 @@
 import { boundedFetch } from "./bounded-fetch.js";
+import { dailyCadenceReport } from "./daily-cadence-report.js";
 import { URLS, WATCHES, EMAIL_LIMITS, SOURCE_EXPECTED_MINUTES } from "./config.js";
 import { parseKeyholder, parseExternalRentalStore, parseDavids, parseDvcShop, fingerprint, formatListing, priceSummary, byId } from "./parsers.js";
 import { Storage, utcDay } from "./storage.js";
@@ -20,6 +21,15 @@ export default {
 
     if (url.pathname === "/" || url.pathname === "/health") {
       return statusResponse(env, store, url.pathname === "/");
+    }
+
+    if (url.pathname === "/diagnostics/daily-cadence" && request.method === "GET") {
+      if (!authorized(request, env.ADMIN_TOKEN)) return new Response("Unauthorized", { status: 401 });
+      try {
+        return json(await dailyCadenceReport(env.DB, url.searchParams.get("day")));
+      } catch (error) {
+        return json({ ok: false, error: errorMessage(error) }, 400);
+      }
     }
 
     if (url.pathname === "/diagnostics/executions" && request.method === "GET") {
