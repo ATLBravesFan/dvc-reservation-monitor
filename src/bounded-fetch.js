@@ -1,15 +1,18 @@
 // Keep upstream HTTP requests shorter than the watch interval. Cloudflare cron
 // invocations can otherwise remain open for minutes on an unresponsive origin.
 export async function boundedFetch(url, options = {}) {
-  const timeoutMs = 12000;
+  const { timeoutMs: requestedTimeoutMs, ...fetchOptions } = options;
+  const timeoutMs = Number.isFinite(requestedTimeoutMs) && requestedTimeoutMs > 0
+    ? requestedTimeoutMs
+    : 12000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error(`HTTP timeout after ${timeoutMs}ms: ${url}`)), timeoutMs);
-  const upstreamSignal = options.signal;
+  const upstreamSignal = fetchOptions.signal;
   const abortFromUpstream = () => controller.abort(upstreamSignal.reason);
   if (upstreamSignal?.aborted) abortFromUpstream();
   else upstreamSignal?.addEventListener("abort", abortFromUpstream, { once: true });
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, { ...fetchOptions, signal: controller.signal });
     // The caller may read the body after fetch resolves. The timeout should
     // also cover that read, so release the timer when the body is consumed.
     if (!response.body || response.status === 204 || response.status === 205 || response.status === 304) {
