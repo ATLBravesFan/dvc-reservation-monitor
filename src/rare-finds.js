@@ -75,8 +75,8 @@ export async function runRareFinds(env, now = new Date()) {
     } catch (error) {
       const message = errorMessage(error);
       try { await store.recordHealth(PRIMARY_SOURCE_KEY, false, null, message); } catch { /* primary error wins */ }
-      // Do not fail the authoritative Rare Finds health here. The browser backup
-      // gets a chance to recover from origin/Cloudflare 522s on a different network path.
+      // The authoritative source is not failed yet. A browser run on a separate
+      // network path gets a chance to recover transient origin/Cloudflare errors.
       throw error;
     }
   });
@@ -98,6 +98,15 @@ export async function recordRareFindsBackupFailure(env, error) {
   const store = new Storage(env.DB);
   const message = errorMessage(error || "Rare Finds browser backup failed");
   try { await store.recordHealth(BROWSER_SOURCE_KEY, false, null, message); } catch { /* main health is authoritative */ }
+
+  // A delayed browser failure must not overwrite a newer successful primary
+  // check. Only fail the combined source while the primary path is still bad.
+  const healthRows = await store.allHealth();
+  const primary = healthRows.find(row => row.source === PRIMARY_SOURCE_KEY);
+  if (!primary || Number(primary.consecutiveFailures || 0) === 0) {
+    return { ok: false, error: message, ignored: true, reason: "primary-recovered" };
+  }
+
   const health = await store.recordHealth(SOURCE_KEY, false, null, `Primary and browser backup failed: ${message}`);
   if (health.consecutiveFailures === 3) {
     try {
@@ -291,7 +300,6 @@ async function maybeCapacityWarning(env, store, currentCount) {
   try {
     await sendBrevo(
       env,
-      store,
       "DVC Monitor email-capacity warning",
       `<p>The monitor has sent ${currentCount} emails today. Low-priority alerts pause at ${EMAIL_LIMITS.lowPriorityCutoff}; bargain alerts remain enabled until the ${EMAIL_LIMITS.hardSafetyCutoff} safety cutoff.</p>`,
     );
