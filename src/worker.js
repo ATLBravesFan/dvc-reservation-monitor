@@ -211,6 +211,7 @@ const RECOVERY_INTERVALS = {
   "davids": [8, "davids"],
   "rental-store-all": [12, "rental-store-all"],
   "rental-store-website-dispatch": [8, "website-backup-dispatch"],
+  "dvcreservations-rare-finds": [15, "rare-finds"],
 };
 
 async function recoverOverdueSources(env, now) {
@@ -221,8 +222,16 @@ async function recoverOverdueSources(env, now) {
     for (const [source, [expectedMinutes, mode]] of Object.entries(RECOVERY_INTERVALS)) {
       const row = health.find(item => item.source === source);
       const last = Date.parse(row?.lastSuccessAt || "");
-      if (Number.isFinite(last) && now.getTime() - last < (expectedMinutes + 10) * 60000) continue;
+      const graceMinutes = source === "dvcreservations-rare-finds" ? 5 : 10;
+      if (Number.isFinite(last) && now.getTime() - last < (expectedMinutes + graceMinutes) * 60000) continue;
       try {
+        if (mode === "rare-finds") {
+          const result = await runRareFinds(env, now);
+          if (!result?.ok) throw new Error(`Recovery ${mode} failed: ${JSON.stringify(result).slice(0,350)}`);
+          recovered.push(source);
+          continue;
+        }
+
         if (!env.ADMIN_TOKEN) throw new Error("ADMIN_TOKEN missing");
         const response = await baseWorker.fetch(new Request(`https://dvc-monitor.internal/run?mode=${mode}`, {
           method: "POST", headers: { Authorization: `Bearer ${env.ADMIN_TOKEN}` },
