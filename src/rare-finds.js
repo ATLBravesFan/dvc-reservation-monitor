@@ -5,6 +5,9 @@ import { Storage, utcDay } from "./storage.js";
 import { withLease } from "./execution-lease.js";
 
 const SOURCE_KEY = "dvcreservations-rare-finds";
+const RARE_FINDS_TIMEOUT_MS = 25000;
+const RARE_FINDS_FETCH_ATTEMPTS = 3;
+const RARE_FINDS_RETRY_DELAY_MS = 750;
 
 export function parseRareFinds(html, now = new Date()) {
   const text = htmlText(html);
@@ -65,15 +68,8 @@ export async function runRareFinds(env, now = new Date()) {
   return withLease(env.DB, SOURCE_KEY, async () => {
   const store = new Storage(env.DB);
   try {
-    const response = await boundedFetch(URLS.rareFindsList, {
-      headers: {
-        Accept: "text/html,application/xhtml+xml",
-        "User-Agent": "Mozilla/5.0 (compatible; DVC-Monitor/2.0)",
-      },
-    });
-    if (!response.ok) throw new Error(`DVCReservations Rare Finds ${response.status}`);
-
-    const rows = parseRareFinds(await response.text(), now);
+    const html = await fetchRareFindsHtml();
+    const rows = parseRareFinds(html, now);
     if (!rows.length) throw new Error("DVCReservations Rare Finds parser returned zero reservations");
 
     const result = await processRareFinds(env, store, rows);
@@ -96,7 +92,7 @@ export async function runRareFinds(env, now = new Date()) {
           env,
           store,
           "DVC Monitor warning — DVCReservations Rare Finds failing",
-          `DVCReservations Rare Finds has failed 3 checks in a row. Latest error: ${message}`,
+          `DVCReservations Rare Finds has failed 3 checks in a row after automatic retries. Latest error: ${message}`,
         );
       } catch {
         // Preserve the source error; warning delivery is secondary.
@@ -105,6 +101,29 @@ export async function runRareFinds(env, now = new Date()) {
     throw error;
   }
   });
+}
+
+async function fetchRareFindsHtml() {
+  let lastError = null;
+  for (let attempt = 1; attempt <= RARE_FINDS_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await boundedFetch(URLS.rareFindsList, {
+        timeoutMs: RARE_FINDS_TIMEOUT_MS,
+        headers: {
+          Accept: "text/html,application/xhtml+xml",
+          "User-Agent": "Mozilla/5.0 (compatible; DVC-Monitor/2.0)",
+        },
+      });
+      if (!response.ok) throw new Error(`DVCReservations Rare Finds ${response.status}`);
+      return await response.text();
+    } catch (error) {
+      lastError = error;
+      if (attempt < RARE_FINDS_FETCH_ATTEMPTS) {
+        await sleep(RARE_FINDS_RETRY_DELAY_MS * attempt);
+      }
+    }
+  }
+  throw lastError || new Error("DVCReservations Rare Finds request failed");
 }
 
 async function processRareFinds(env, store, rows) {
@@ -375,6 +394,10 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, character => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[character]);
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function errorMessage(error) {
