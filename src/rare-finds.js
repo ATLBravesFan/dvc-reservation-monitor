@@ -5,9 +5,9 @@ import { Storage, utcDay } from "./storage.js";
 import { withLease } from "./execution-lease.js";
 
 const SOURCE_KEY = "dvcreservations-rare-finds";
+const PRIMARY_SOURCE_KEY = "dvcreservations-rare-finds-primary";
+const BROWSER_SOURCE_KEY = "dvcreservations-rare-finds-browser-ingest";
 const RARE_FINDS_TIMEOUT_MS = 25000;
-const RARE_FINDS_FETCH_ATTEMPTS = 3;
-const RARE_FINDS_RETRY_DELAY_MS = 750;
 
 export function parseRareFinds(html, now = new Date()) {
   const text = htmlText(html);
@@ -66,64 +66,85 @@ export function parseRareFinds(html, now = new Date()) {
 
 export async function runRareFinds(env, now = new Date()) {
   return withLease(env.DB, SOURCE_KEY, async () => {
-  const store = new Storage(env.DB);
-  try {
-    const html = await fetchRareFindsHtml();
-    const rows = parseRareFinds(html, now);
-    if (!rows.length) throw new Error("DVCReservations Rare Finds parser returned zero reservations");
-
-    const result = await processRareFinds(env, store, rows);
-    await store.recordHealth(SOURCE_KEY, true, {
-      ok: true,
-      count: rows.length,
-      baseline: result.baseline,
-      alerts: result.alerts,
-      deferred: result.deferred,
-      under200: rows.filter(row => WATCHES.rentalStoreNightly.match(row)).length,
-      under12pt: rows.filter(row => WATCHES.rentalStorePoints.match(row)).length,
-    }, null);
-    return { ok: true, count: rows.length, ...result };
-  } catch (error) {
-    const message = errorMessage(error);
-    const health = await store.recordHealth(SOURCE_KEY, false, null, message);
-    if (health.consecutiveFailures === 3) {
-      try {
-        await sendSystemEmail(
-          env,
-          store,
-          "DVC Monitor warning — DVCReservations Rare Finds failing",
-          `DVCReservations Rare Finds has failed 3 checks in a row after automatic retries. Latest error: ${message}`,
-        );
-      } catch {
-        // Preserve the source error; warning delivery is secondary.
-      }
+    const store = new Storage(env.DB);
+    try {
+      const html = await fetchRareFindsHtml();
+      const result = await ingestRows(env, store, parseAndValidate(html, now), "primary");
+      await store.recordHealth(PRIMARY_SOURCE_KEY, true, { ok: true, count: result.count }, null);
+      return result;
+    } catch (error) {
+      const message = errorMessage(error);
+      try { await store.recordHealth(PRIMARY_SOURCE_KEY, false, null, message); } catch { /* primary error wins */ }
+      // Do not fail the authoritative Rare Finds health here. The browser backup
+      // gets a chance to recover from origin/Cloudflare 522s on a different network path.
+      throw error;
     }
-    throw error;
-  }
   });
 }
 
-async function fetchRareFindsHtml() {
-  let lastError = null;
-  for (let attempt = 1; attempt <= RARE_FINDS_FETCH_ATTEMPTS; attempt += 1) {
+export async function ingestRareFindsHtml(env, html, now = new Date(), origin = "browser") {
+  return withLease(env.DB, SOURCE_KEY, async () => {
+    const store = new Storage(env.DB);
+    const rows = parseAndValidate(html, now);
+    const result = await ingestRows(env, store, rows, origin);
+    if (origin === "browser") {
+      await store.recordHealth(BROWSER_SOURCE_KEY, true, { ok: true, count: rows.length, alerts: result.alerts }, null);
+    }
+    return result;
+  });
+}
+
+export async function recordRareFindsBackupFailure(env, error) {
+  const store = new Storage(env.DB);
+  const message = errorMessage(error || "Rare Finds browser backup failed");
+  try { await store.recordHealth(BROWSER_SOURCE_KEY, false, null, message); } catch { /* main health is authoritative */ }
+  const health = await store.recordHealth(SOURCE_KEY, false, null, `Primary and browser backup failed: ${message}`);
+  if (health.consecutiveFailures === 3) {
     try {
-      const response = await boundedFetch(URLS.rareFindsList, {
-        timeoutMs: RARE_FINDS_TIMEOUT_MS,
-        headers: {
-          Accept: "text/html,application/xhtml+xml",
-          "User-Agent": "Mozilla/5.0 (compatible; DVC-Monitor/2.0)",
-        },
-      });
-      if (!response.ok) throw new Error(`DVCReservations Rare Finds ${response.status}`);
-      return await response.text();
-    } catch (error) {
-      lastError = error;
-      if (attempt < RARE_FINDS_FETCH_ATTEMPTS) {
-        await sleep(RARE_FINDS_RETRY_DELAY_MS * attempt);
-      }
+      await sendSystemEmail(
+        env,
+        store,
+        "DVC Monitor warning — DVCReservations Rare Finds failing",
+        `DVCReservations Rare Finds has failed 3 complete checks in a row. Both the Cloudflare primary fetch and GitHub browser backup failed. Latest backup error: ${message}`,
+      );
+    } catch {
+      // Preserve the source error; warning delivery is secondary.
     }
   }
-  throw lastError || new Error("DVCReservations Rare Finds request failed");
+  return { ok: false, error: message, consecutiveFailures: health.consecutiveFailures };
+}
+
+async function fetchRareFindsHtml() {
+  const response = await boundedFetch(URLS.rareFindsList, {
+    timeoutMs: RARE_FINDS_TIMEOUT_MS,
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "User-Agent": "Mozilla/5.0 (compatible; DVC-Monitor/2.0)",
+    },
+  });
+  if (!response.ok) throw new Error(`DVCReservations Rare Finds ${response.status}`);
+  return response.text();
+}
+
+function parseAndValidate(html, now) {
+  const rows = parseRareFinds(html, now);
+  if (!rows.length) throw new Error("DVCReservations Rare Finds parser returned zero reservations");
+  return rows;
+}
+
+async function ingestRows(env, store, rows, origin) {
+  const result = await processRareFinds(env, store, rows);
+  await store.recordHealth(SOURCE_KEY, true, {
+    ok: true,
+    origin,
+    count: rows.length,
+    baseline: result.baseline,
+    alerts: result.alerts,
+    deferred: result.deferred,
+    under200: rows.filter(row => WATCHES.rentalStoreNightly.match(row)).length,
+    under12pt: rows.filter(row => WATCHES.rentalStorePoints.match(row)).length,
+  }, null);
+  return { ok: true, origin, count: rows.length, ...result };
 }
 
 async function processRareFinds(env, store, rows) {
@@ -270,6 +291,7 @@ async function maybeCapacityWarning(env, store, currentCount) {
   try {
     await sendBrevo(
       env,
+      store,
       "DVC Monitor email-capacity warning",
       `<p>The monitor has sent ${currentCount} emails today. Low-priority alerts pause at ${EMAIL_LIMITS.lowPriorityCutoff}; bargain alerts remain enabled until the ${EMAIL_LIMITS.hardSafetyCutoff} safety cutoff.</p>`,
     );
@@ -394,10 +416,6 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, character => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[character]);
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function errorMessage(error) {
