@@ -2,12 +2,13 @@ import { boundedFetch } from "./bounded-fetch.js";
 import baseWorker from "./index.js";
 import { URLS } from "./config.js";
 import { parseDvcRentalDealsHtml } from "./dvc-rental-direct.js";
-import { runRareFinds } from "./rare-finds.js";
+import { ingestRareFindsHtml, recordRareFindsBackupFailure, runRareFinds } from "./rare-finds.js";
 import { Storage } from "./storage.js";
 import { withLease } from "./execution-lease.js";
 
 const GITHUB_REPO = "ATLBravesFan/dvc-reservation-monitor";
 const DVC_RENTAL_WORKFLOW = "dvc-rental-browser.yml";
+const RARE_FINDS_WORKFLOW = "rare-finds-browser.yml";
 
 export default {
   async scheduled(event, env, ctx) {
@@ -32,7 +33,8 @@ export default {
     }
 
     if (minute % 15 === 0) {
-      ctx.waitUntil(runRareFinds(env, now));
+      ctx.waitUntil(runRareFindsWithFallback(env, now).catch(error =>
+        console.error("Rare Finds primary+fallback failed", error instanceof Error ? error.message : String(error))));
     }
 
     // Recover overdue HTTP sources even if GitHub scheduled Actions are delayed.
@@ -70,7 +72,7 @@ export default {
       }
 
       try {
-        const result = await runRareFinds(env, new Date());
+        const result = await runRareFindsWithFallback(env, new Date());
         return new Response(JSON.stringify({ rareFinds: result }, null, 2), {
           headers: { "content-type": "application/json;charset=utf-8" },
         });
@@ -82,9 +84,118 @@ export default {
       }
     }
 
+    if (url.pathname === "/ingest/rare-finds" && request.method === "POST") {
+      const token = env.INGEST_TOKEN || env.ADMIN_TOKEN;
+      if (!token || (request.headers.get("authorization") || "") !== `Bearer ${token}`) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      try {
+        const body = await request.json();
+        if (typeof body?.html !== "string" || !body.html.trim()) {
+          return new Response(JSON.stringify({ ok: false, error: "Expected non-empty html" }), {
+            status: 400, headers: { "content-type": "application/json;charset=utf-8" },
+          });
+        }
+        const checkedAt = body.checkedAt ? new Date(body.checkedAt) : new Date();
+        const now = Number.isNaN(checkedAt.getTime()) ? new Date() : checkedAt;
+        const result = await ingestRareFindsHtml(env, body.html, now, "browser");
+        const skipped = Boolean(result?.skipped);
+        return new Response(JSON.stringify(result, null, 2), {
+          status: skipped ? 409 : 200,
+          headers: { "content-type": "application/json;charset=utf-8" },
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }), {
+          status: 500, headers: { "content-type": "application/json;charset=utf-8" },
+        });
+      }
+    }
+
+    if (url.pathname === "/ingest/rare-finds/failure" && request.method === "POST") {
+      const token = env.INGEST_TOKEN || env.ADMIN_TOKEN;
+      if (!token || (request.headers.get("authorization") || "") !== `Bearer ${token}`) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      try {
+        const body = await request.json();
+        const result = await recordRareFindsBackupFailure(env, body?.error || "Rare Finds browser backup failed");
+        return new Response(JSON.stringify(result, null, 2), {
+          headers: { "content-type": "application/json;charset=utf-8" },
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }), {
+          status: 500, headers: { "content-type": "application/json;charset=utf-8" },
+        });
+      }
+    }
+
     return baseWorker.fetch(request, env);
   },
 };
+
+async function runRareFindsWithFallback(env, now) {
+  try {
+    return await runRareFinds(env, now);
+  } catch (error) {
+    const primaryError = error instanceof Error ? error.message : String(error);
+    const fallback = await dispatchRareFindsBrowser(env, now);
+    if (!fallback?.ok) {
+      await recordRareFindsBackupFailure(env, `Primary: ${primaryError}; browser dispatch: ${fallback?.error || "unknown failure"}`);
+      throw new Error(`Rare Finds primary failed and browser dispatch failed: ${primaryError}; ${fallback?.error || "unknown failure"}`);
+    }
+    return {
+      ok: true,
+      fallbackDispatched: true,
+      fallbackPending: true,
+      primaryError,
+      dispatchedAt: fallback.dispatchedAt || null,
+      dispatchSkipped: Boolean(fallback.skipped),
+    };
+  }
+}
+
+async function dispatchRareFindsBrowser(env, now) {
+  const store = new Storage(env.DB);
+  return withLease(env.DB, "dvcreservations-rare-finds-browser-dispatch", async () => {
+    try {
+      if (!env.GITHUB_DISPATCH_TOKEN) throw new Error("GITHUB_DISPATCH_TOKEN not configured");
+
+      const health = await store.allHealth();
+      const previous = health.find(row => row.source === "dvcreservations-rare-finds-browser-dispatch");
+      const lastDispatch = Date.parse(previous?.lastCheckedAt || "");
+      if (Number(previous?.consecutiveFailures || 0) === 0 && Number.isFinite(lastDispatch) && now.getTime() - lastDispatch < 10 * 60000) {
+        return { ok: true, skipped: true, reason: "recent-dispatch", dispatchedAt: previous.lastCheckedAt };
+      }
+
+      const response = await boundedFetch(
+        `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/${RARE_FINDS_WORKFLOW}/dispatches`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.GITHUB_DISPATCH_TOKEN}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "DVC-Reservation-Monitor",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ ref: "main" }),
+        },
+      );
+
+      if (response.status !== 204) {
+        throw new Error(`GitHub Rare Finds workflow dispatch ${response.status}: ${(await response.text()).slice(0, 250)}`);
+      }
+
+      const details = { ok: true, dispatchedAt: now.toISOString() };
+      await store.recordHealth("dvcreservations-rare-finds-browser-dispatch", true, details, null);
+      return details;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      try { await store.recordHealth("dvcreservations-rare-finds-browser-dispatch", false, null, message); } catch { /* keep dispatch failure primary */ }
+      return { ok: false, error: message };
+    }
+  });
+}
 
 async function runDvcRentalDirect(env, now) {
   const store = new Storage(env.DB);
@@ -226,7 +337,7 @@ async function recoverOverdueSources(env, now) {
       if (Number.isFinite(last) && now.getTime() - last < (expectedMinutes + graceMinutes) * 60000) continue;
       try {
         if (mode === "rare-finds") {
-          const result = await runRareFinds(env, now);
+          const result = await runRareFindsWithFallback(env, now);
           if (!result?.ok) throw new Error(`Recovery ${mode} failed: ${JSON.stringify(result).slice(0,350)}`);
           recovered.push(source);
           continue;
