@@ -9,3 +9,4 @@ Deploy D1 execution-history composite indexes to reduce free-tier rows_read scan
 Deploy daily 14-day execution-history retention cleanup in the Queue consumer. 2026-10-13.
 Deploy DVC Shop five-minute cadence policy. 2026-10-14.
 Redeploy with explicit 30s CPU limit and persisted Workers observability. 2026-10-14.
+Deploy Rare Finds 25-second timeout, automatic retries, and Cloudflare recovery. 2026-10-17.
