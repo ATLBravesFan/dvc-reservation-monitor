@@ -10,3 +10,4 @@ Deploy daily 14-day execution-history retention cleanup in the Queue consumer. 2
 Deploy DVC Shop five-minute cadence policy. 2026-10-14.
 Redeploy with explicit 30s CPU limit and persisted Workers observability. 2026-10-14.
 Deploy Rare Finds 25-second timeout, automatic retries, and Cloudflare recovery. 2026-10-17.
+Deploy Rare Finds alternate-network browser fallback with authoritative dual-path health. 2026-10-17.
