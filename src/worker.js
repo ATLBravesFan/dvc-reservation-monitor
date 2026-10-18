@@ -330,6 +330,7 @@ async function recoverOverdueSources(env, now) {
   return withLease(env.DB, "cloudflare-source-recovery", async () => {
     const health = await store.allHealth();
     const recovered = [];
+    const failures = [];
     for (const [source, [expectedMinutes, mode]] of Object.entries(RECOVERY_INTERVALS)) {
       const row = health.find(item => item.source === source);
       const last = Date.parse(row?.lastSuccessAt || "");
@@ -353,10 +354,15 @@ async function recoverOverdueSources(env, now) {
         }
         recovered.push(source);
       } catch (error) {
-        console.error("source recovery failed", source, error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        failures.push({ source, error: message });
+        console.error("source recovery failed", source, message);
       }
     }
-    await store.putMeta("cloudflare-source-recovery", { checkedAt: new Date().toISOString(), recovered });
-    return { recovered };
+    await store.putMeta("cloudflare-source-recovery", { checkedAt: new Date().toISOString(), recovered, failures });
+    await store.recordHealth("cloudflare-source-recovery", failures.length === 0,
+      { recovered, failures }, failures.length ? failures.map(item => `${item.source}: ${item.error}`).join("; ").slice(0, 1000) : null);
+    if (failures.length) throw new Error(`Cloudflare recovery failed for: ${failures.map(item => item.source).join(", ")}`);
+    return { recovered, failures };
   });
 }
