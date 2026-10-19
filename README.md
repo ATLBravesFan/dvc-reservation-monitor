@@ -11,9 +11,9 @@ Free-tier DVC confirmed-reservation monitoring built with Cloudflare Workers + D
 | DVC Rental Store website backup | requested every 5 minutes; 15-minute GitHub cron fallback | new + price changes matching either fast Rental Store filter |
 | DVC Rental Store - All Reservations | every 10 minutes | all new reservations + price changes |
 | David's Vacation Rentals | every 5 minutes | `< $300/night` OR 1/2/3-bedroom `< $17/point`; new + price changes |
-| DVC-Rental direct primary | every 5 minutes | all newly listed confirmed reservations from structured `/deals` data |
-| DVC-Rental browser fallback | every 10 minutes | browser verification/fallback using the same D1 state and deduplication |
-| DVC Shop | every minute | newly available confirmed reservations |
+| DVC-Rental direct primary | every 5 minutes | all new confirmed reservations + price changes from structured `/deals` data |
+| DVC-Rental browser fallback | every 10 minutes | browser verification/fallback for new reservations and price changes using the same D1 state and deduplication |
+| DVC Shop | every 5 minutes | newly available confirmed reservations + price changes |
 | DVCReservations Rare Finds | every 15 minutes | new reservations + price changes |
 
 Any monitored source that exposes enough price data is also checked for the priority bargain thresholds `< $201/night` and `< $12/point`. A matching event gets a flame subject so it stands out in Gmail and Pushover. The nightly threshold can be evaluated for every current source. Point-price matching requires the source to expose point count or point price; Rental Store and David's currently do so, while the current DVC-Rental and DVC Shop listing feeds do not reliably expose point pricing.
