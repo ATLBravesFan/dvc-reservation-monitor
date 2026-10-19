@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { WATCHES, EMAIL_LIMITS } from "../src/config.js";
-import { normalizeBrowserRows, newlyAvailableDvcShopListing } from "../src/index.js";
+import { normalizeBrowserRows, newlyAvailableDvcShopListing, dvcRentalComparableFingerprint } from "../src/index.js";
 import { parseKeyholder, parseDavids, parseDvcShop, fingerprint, formatListing } from "../src/parsers.js";
 
 assert.equal(WATCHES.rentalStoreNightly.match({ nightly: 200.99 }), true);
@@ -85,5 +85,13 @@ const directDeal = {
 const [browserDeal] = normalizeBrowserRows([directDeal], "DVC-Rental");
 assert.equal(browserDeal.listedPointPrice, 27);
 assert.equal(fingerprint(directDeal), fingerprint(browserDeal), "Browser fallback must not invent price changes");
+const legacyDvcRentalDeal = { ...directDeal };
+delete legacyDvcRentalDeal.listedPointPrice;
+assert.notEqual(fingerprint(legacyDvcRentalDeal), fingerprint(directDeal));
+assert.equal(dvcRentalComparableFingerprint(legacyDvcRentalDeal), dvcRentalComparableFingerprint(directDeal),
+  "Adding site-rate metadata cannot generate a fake price change");
+assert.notEqual(dvcRentalComparableFingerprint({ ...directDeal, total: 2000, nightly: 400 }),
+  dvcRentalComparableFingerprint(directDeal), "A real price change must alert");
+
 
 console.log("DVC monitor smoke tests passed");
