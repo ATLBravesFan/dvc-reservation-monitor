@@ -102,6 +102,7 @@ export const SOURCE_EXPECTED_MINUTES = {
   "rental-store-website-dispatch": 8,
   "davids": 8,
   "dvc-shop": 8,
+  "dvc-shop-publication-audit": 8,
   "dvc-rental": 15,
   "dvc-rental-direct": 8,
   "dvc-rental-dispatch": 13,
