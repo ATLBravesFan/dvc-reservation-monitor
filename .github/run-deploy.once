@@ -12,3 +12,4 @@ Redeploy with explicit 30s CPU limit and persisted Workers observability. 2026-1
 Deploy Rare Finds 25-second timeout, automatic retries, and Cloudflare recovery. 2026-10-17.
 Deploy Rare Finds alternate-network browser fallback with authoritative dual-path health. 2026-10-17.
 Redeploy and verify Rare Finds browser fallback path. 2026-10-17.
+Deploy all-watch price-change alerts, DVC-Rental browser/direct price parity, and DVC Shop availability re-entry alerts. 2026-10-19.
