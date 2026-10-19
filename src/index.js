@@ -378,6 +378,10 @@ async function pollSlowerHttpSources(env, store) {
   };
 }
 
+export function newlyAvailableDvcShopListing(previous, current) {
+  return !WATCHES.dvcShop.match(previous) && WATCHES.dvcShop.match(current);
+}
+
 async function processStandardWatch(env, store, key, watch, rows) {
   const previous = await store.getSnapshot(key);
   assertInventoryHealthy(previous, rows, key);
@@ -393,7 +397,9 @@ async function processStandardWatch(env, store, key, watch, rows) {
     if (!watch.match(listing)) continue;
     const matches = bargainMatches(listing);
     const old = previous[listing.id];
-    if (!old) {
+    // DVC Shop keeps unavailable rows in its full snapshot. When one becomes
+    // available again, notify even if its price and dates did not change.
+    if (!old || (key === "dvc-shop" && newlyAvailableDvcShopListing(old, listing))) {
       events.push({ type: "NEW", listing, matches });
       continue;
     }
