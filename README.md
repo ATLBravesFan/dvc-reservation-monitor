@@ -36,6 +36,14 @@ Production alerts go to the notification-only Gmail account in `EMAIL_TO` and, w
 - The status page shows source last-check/last-success timestamps, failure counts, email usage, and last added/changed activity for each watch.
 - With notification Gmail + primary Gmail + the Pushover email gateway, each alert can consume three Brevo recipient deliveries. The monitor warns at 70 alert emails/day, pauses low-priority emails at 82, and preserves bargain-alert capacity until a hard safety cutoff of 96 alert emails/day, keeping the theoretical maximum below 300 recipient deliveries/day.
 
+## DVC Shop publication-to-alert timing audit
+
+- A separate, read-only five-minute check (staggered two minutes after each five-minute boundary) requests the **100 newest reservation posts** from DVC Shop's public WordPress API, using each listing's `date_gmt`.
+- The normal DVC Shop watch records the **first time it discovers each new reservation** and when a previously unavailable listing becomes available. A successful Brevo alert records its **first send/acceptance time**. No additional emails are sent by the publication audit.
+- Open `/publication-audit` for a read-only JSON comparison or view the new DVC Shop timing table on the dashboard. The audit flags posts published after monitoring was enabled that remain unseen or unnotified beyond **12 minutes**, subject to current availability.
+- An older reservation found in a snapshot when the audit starts remains a historical baseline. Its original first-seen or first-notification time cannot be reconstructed from current D1 snapshots. WordPress post dates are not guaranteed to equal the instant the reservation first became publicly available, and Brevo acceptance time is not the same as inbox delivery.
+- The checker uses a small 100-post metadata response and writes only new publication records, newly seen reservations, and actual accepted alerts—rather than rewriting the entire inventory every five minutes. Its health appears as `dvc-shop-publication-audit`.
+
 ## Storage
 
 The deploy workflow creates or reuses a D1 database named `dvc-monitor-state`, applies `migrations/0001_init.sql`, binds it to the Worker as `DB`, and deploys the Worker.
