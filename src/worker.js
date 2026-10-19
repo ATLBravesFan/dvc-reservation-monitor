@@ -4,6 +4,7 @@ import { URLS } from "./config.js";
 import { parseDvcRentalDealsHtml } from "./dvc-rental-direct.js";
 import { ingestRareFindsHtml, recordRareFindsBackupFailure, runRareFinds } from "./rare-finds.js";
 import { Storage } from "./storage.js";
+import { runDvcShopPublicationAudit } from "./dvc-shop-publication-audit.js";
 import { withLease } from "./execution-lease.js";
 
 const GITHUB_REPO = "ATLBravesFan/dvc-reservation-monitor";
@@ -30,6 +31,13 @@ export default {
       // Check recovery each minute so a missed 10-minute dispatch does not
       // wait for the next five-minute boundary. Dispatch remains throttled.
       ctx.waitUntil(recoverStaleDvcRentalBrowser(env, now));
+    }
+
+    // Independently check WordPress per-listing publication timestamps,
+    // staggered from the normal five-minute DVC Shop source poll.
+    if (minute % 5 === 2) {
+      ctx.waitUntil(runDvcShopPublicationAudit(env, now).catch(error =>
+        console.error("DVC Shop publication audit failed", error instanceof Error ? error.message : String(error))));
     }
 
     if (minute % 15 === 0) {
