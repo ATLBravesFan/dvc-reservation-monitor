@@ -28,19 +28,35 @@ const outboxRows=[
 ];
 const rareRows=[{source:"dvcreservations-rare-finds",listing_id:"RARE-23",created_at:"2026-10-19T13:10:00Z",sent_at:"2026-10-19T13:11:00Z",status:"sent"}];
 let writes=0, queries=[];
-const db={prepare(sql){queries.push(sql);return {bind(...args){return {
- async all(){
-  if(sql.includes("FROM alert_outbox")){
-   const filtered=sql.includes(" AND source = ?")?outboxRows.filter(x=>x.source===args[0]):outboxRows;
-   return {results:filtered};
-  }
-  if(sql.includes("FROM alerts WHERE"))return {results:rareRows};
-  if(sql.includes("FROM dvc_shop_publication_audit"))
-   return {results:[{listing_id:"587543",published_at:"2026-10-19T13:16:45Z",first_seen_at:"2026-10-19T13:21:00Z"}]};
-  throw Error("Unexpected query: "+sql);
- },
- async run(){writes++;throw Error("Timing audit must be read-only");},
- };}}};
+const db = {
+  prepare(sql) {
+    queries.push(sql);
+    return {
+      bind(...args) {
+        return {
+          async all() {
+            if (sql.includes("FROM alert_outbox")) {
+              const filtered = sql.includes(" AND source = ?")
+                ? outboxRows.filter(x => x.source === args[0]) : outboxRows;
+              return { results: filtered };
+            }
+            if (sql.includes("FROM alerts WHERE")) return { results: rareRows };
+            if (sql.includes("FROM dvc_shop_publication_audit")) {
+              return { results: [{ listing_id: "587543",
+                published_at: "2026-10-19T13:16:45Z",
+                first_seen_at: "2026-10-19T13:21:00Z" }] };
+            }
+            throw new Error("Unexpected query: " + sql);
+          },
+          async run() {
+            writes++;
+            throw new Error("Timing audit must be read-only");
+          },
+        };
+      },
+    };
+  },
+};
 const report=await getAllWatchTimingReport(db,{limit:30});
 assert.equal(report.sampledEvents,5);
 assert.equal(report.sources.length,5);
