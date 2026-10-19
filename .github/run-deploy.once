@@ -19,3 +19,4 @@ Deploy DVC Shop publication-to-alert latency audit, D1 migration, and historical
 Fix DVC Shop first-seen timestamp hook on standard watch and verify publication audit. 2026-10-19.
 Deploy read-only all-website DVC detection-to-notification timing audit and query indexes. 2026-10-19.
 Redeploy all-watch timing audit after fixing syntax in regression test fixture. 2026-10-19.
+Deploy per-website fair sampling for DVC timing dashboards and D1 source-timing index. 2026-10-19.
