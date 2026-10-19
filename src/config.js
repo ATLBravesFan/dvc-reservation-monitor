@@ -73,7 +73,8 @@ export const WATCHES = {
     title: "DVC Shop",
     interval: "5 minutes",
     priceChanges: true,
-    match: r => !r.status || /available/i.test(r.status),
+    // Match a true Available status, not the substring in "Unavailable".
+    match: r => !r.status || /^available\b/i.test(String(r.status).trim()),
   },
   rareFinds: {
     title: "DVCReservations Rare Finds",
