@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   parsePublicationPosts, evaluateDvcShopPublication,
   recordDvcShopObservations, recordDvcShopAlertSends,
@@ -58,4 +59,14 @@ assert.equal(writes.length,2);
 await recordDvcShopAlertSends(db,[{type:"NEW",listing:{id:"587405"}}],new Date("2026-10-18T20:46:00Z"));
 assert.equal(writes.length,3);
 assert.deepEqual(writes[2].params.slice(0,3),["587405","2026-10-18T20:46:00.000Z","2026-10-18T20:46:00.000Z"]);
+// Regression guard: first-sighting must be attached to the DVC Shop's
+// standard watch; it must never be accidentally added to Rental Store polling.
+const indexSource = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+const fastBlock = indexSource.split("async function processRentalStoreFast(env, store, rows) {")[1]
+  .split("async function processRentalStoreAllWatch")[0];
+const standardBlock = indexSource.split("async function processStandardWatch(env, store, key, watch, rows) {")[1]
+  .split("async function sendEvents")[0];
+assert.ok(standardBlock.includes("await recordDvcShopObservations(env.DB, rows, previous);"));
+assert.ok(!fastBlock.includes("recordDvcShopObservations"));
+
 console.log("DVC Shop publication audit tests passed");
