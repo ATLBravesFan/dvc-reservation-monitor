@@ -14,3 +14,4 @@ Deploy Rare Finds alternate-network browser fallback with authoritative dual-pat
 Redeploy and verify Rare Finds browser fallback path. 2026-10-17.
 Deploy all-watch price-change alerts, DVC-Rental browser/direct price parity, and DVC Shop availability re-entry alerts. 2026-10-19.
 Redeploy corrected DVC Shop status matcher; fix unavailable-as-available bug and validate price-change coverage. 2026-10-19.
+Deploy semantic DVC-Rental price fingerprint to prevent metadata-only false alerts. 2026-10-19.
