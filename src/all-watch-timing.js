@@ -8,7 +8,7 @@ const SOURCES = Object.freeze([
   { key: "dvc-shop", name: "DVC Shop", publication: "wordpress-post-date" },
   { key: "dvcreservations-rare-finds", name: "DVCReservations Rare Finds", publication: "unavailable" },
 ]);
-const MAX_ROWS = 150;
+const MAX_ROWS = 60;
 const SLOW_MINUTES = 12;
 
 export function normalizeTimingRecord(raw, shopMetadata = null) {
@@ -65,35 +65,35 @@ function median(nums) {
   return sorted[Math.floor(sorted.length/2)];
 }
 
-export async function getAllWatchTimingReport(db, { source = null, limit = 80 } = {}) {
+export async function getAllWatchTimingReport(db, { source = null, limit = 30 } = {}) {
   if (source && !SOURCES.some(x => x.key === source)) throw new Error("Unknown timing audit source");
-  const capped = Math.max(1, Math.min(MAX_ROWS, Math.floor(Number(limit) || 80)));
-  const criteria = source ? " AND source = ?" : "";
-  const args = source ? [source, capped] : [capped];
-  // These are existing records written by normal monitoring. INDEXes support
-  // efficient newest-first inspection without adding any polling or writes.
-  const outbox = await db.prepare(`SELECT alert_key,source,listing_id,payload,created_at,updated_at,status
-    FROM alert_outbox WHERE status='sent'${criteria} ORDER BY updated_at DESC LIMIT ?`)
-    .bind(...args).all();
-  const normalized = (outbox.results || []).map(r => ({
-    source: r.source, listingId: r.listing_id,
-    eventType: jsonEvent(r.payload),
-    detectedAt: r.created_at, sentAt: r.updated_at, status: r.status,
+  const capped = Math.max(1, Math.min(MAX_ROWS, Math.floor(Number(limit) || 30)));
+  // Sample each website independently. A busy DVC-Rental feed must not
+  // crowd David's, Rental Store or Rare Finds out of the audit view.
+  const selected = SOURCES.filter(x => !source || x.key === source);
+  const batches = await Promise.all(selected.map(async site => {
+    if (site.key === "dvcreservations-rare-finds") {
+      // Rare Finds uses the legacy immediate-send ledger.
+      const rare = await db.prepare(`SELECT source,listing_id,created_at,sent_at,status
+        FROM alerts WHERE source='dvcreservations-rare-finds' AND status='sent'
+        ORDER BY sent_at DESC LIMIT ?`).bind(capped).all();
+      return (rare.results || []).map(r => ({
+        source:r.source,listingId:r.listing_id,eventType:"NEW/CHANGE (not recorded)",
+        detectedAt:r.created_at,sentAt:r.sent_at,status:r.status,
+      }));
+    }
+    const records = await db.prepare(`SELECT alert_key,source,listing_id,payload,created_at,updated_at,status
+      FROM alert_outbox WHERE status='sent' AND source = ?
+      ORDER BY updated_at DESC LIMIT ?`)
+      .bind(site.key, capped).all();
+    return (records.results || []).map(r => ({
+      source:r.source,listingId:r.listing_id,eventType:jsonEvent(r.payload),
+      detectedAt:r.created_at,sentAt:r.updated_at,status:r.status,
+    }));
   }));
-  // Rare Finds is delivered immediately using the original legacy ledger,
-  // rather than the shared outbox. Its ledger retains up to 60 days; it does
-  // not persist NEW vs CHANGED event classifications.
-  if (!source || source === "dvcreservations-rare-finds") {
-    const rare = await db.prepare(`SELECT source,listing_id,created_at,sent_at,status
-      FROM alerts WHERE source='dvcreservations-rare-finds' AND status='sent'
-      ORDER BY sent_at DESC LIMIT ?`).bind(capped).all();
-    for (const r of rare.results || []) normalized.push({
-      source:r.source,listingId:r.listing_id,eventType:"NEW/CHANGE (not recorded)",
-      detectedAt:r.created_at,sentAt:r.sent_at,status:r.status,
-    });
-  }
+  const normalized = batches.flat();
   normalized.sort((a,b)=>String(b.sentAt||"").localeCompare(String(a.sentAt||"")));
-  const recent=normalized.slice(0,capped);
+  const recent = normalized;
   const ids=[...new Set(recent.filter(r=>r.source==="dvc-shop").map(r=>String(r.listingId)))];
   let shop=new Map();
   if (ids.length) {
@@ -121,7 +121,7 @@ export async function getAllWatchTimingReport(db, { source = null, limit = 80 } 
       detectionTime:"For each qualifying NEW/PRICE CHANGE event, queue insertion is when the monitor first recognized the event. It may have seen a listing earlier if it did not qualify for notification.",
       notificationTime:"Sent time is when Brevo accepted the alert (or Rare Finds marked it sent), not Gmail arrival or phone push.",
       priceChanges:"A website's true price-edit timestamp is not exposed by these sources. Price-change detection-to-send can still be measured.",
-      limitations:"Rare Finds' legacy ledger retains roughly 60 days and does not retain per-event NEW/CHANGED type. Historical baselines cannot be recreated. Displayed summaries cover sampled recent events only.",
+      limitations:"Rare Finds' legacy ledger retains roughly 60 days and does not retain per-event NEW/CHANGED type. Historical baselines cannot be recreated. Displayed summaries cover up to the requested number of newest alerts for EACH website, not lifetime totals.",
       additionalWebsiteRequests:0,additionalEmails:0,
     },
   };
