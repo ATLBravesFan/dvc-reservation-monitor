@@ -671,7 +671,7 @@ async function putSnapshotIfChanged(store, key, previous, current) {
   if (JSON.stringify(previous) !== JSON.stringify(current)) await store.putSnapshot(key, current);
 }
 
-function normalizeBrowserRows(rows, source) {
+export function normalizeBrowserRows(rows, source) {
   return rows.map(row => ({
     id: String(row.id || "").trim(),
     source,
@@ -683,6 +683,8 @@ function normalizeBrowserRows(rows, source) {
     total: numberOrNull(row.total),
     nightly: numberOrNull(row.nightly),
     pointPrice: numberOrNull(row.pointPrice),
+    listedPointPrice: numberOrNull(row.listedPointPrice),
+    effectivePointPrice: numberOrNull(row.effectivePointPrice),
     points: numberOrNull(row.points),
     status: row.status || "Available",
     bookingUrl: row.bookingUrl || null,
