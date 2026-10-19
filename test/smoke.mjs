@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { WATCHES, EMAIL_LIMITS } from "../src/config.js";
-import { normalizeBrowserRows } from "../src/index.js";
+import { normalizeBrowserRows, newlyAvailableDvcShopListing } from "../src/index.js";
 import { parseKeyholder, parseDavids, parseDvcShop, fingerprint, formatListing } from "../src/parsers.js";
 
 assert.equal(WATCHES.rentalStoreNightly.match({ nightly: 200.99 }), true);
@@ -10,6 +10,9 @@ assert.equal(WATCHES.rentalStorePoints.match({ pointPrice: 12.00 }), false);
 assert.equal(WATCHES.rentalStorePoints.match({ pointPrice: 11.50, effectivePointPrice: 12.50 }), false);
 assert.equal(WATCHES.rentalStorePoints.match({ pointPrice: 12.50, effectivePointPrice: 11.50 }), true);
 assert.equal(WATCHES.rentalStoreAll.match({ nightly: 9999 }), true);
+assert.equal(newlyAvailableDvcShopListing({ status: "Unavailable" }, { status: "Available" }), true);
+assert.equal(newlyAvailableDvcShopListing({ status: "Available" }, { status: "Available" }), false);
+
 assert.equal(Object.values(WATCHES).every(watch => watch.priceChanges === true), true, "Every watch must alert on price changes");
 assert.equal(WATCHES.davids.match({ nightly: 375.99, room: "Deluxe Studio", pointPrice: 24 }), true);
 assert.equal(WATCHES.davids.match({ nightly: 376.00, room: "Deluxe Studio", pointPrice: 24 }), false);
