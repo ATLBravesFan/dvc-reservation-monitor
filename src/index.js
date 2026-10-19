@@ -1,5 +1,6 @@
 import { boundedFetch } from "./bounded-fetch.js";
 import { dailyCadenceReport } from "./daily-cadence-report.js";
+import { recordDvcShopObservations, recordDvcShopAlertSends, getDvcShopPublicationReport } from "./dvc-shop-publication-audit.js";
 import { URLS, WATCHES, EMAIL_LIMITS, SOURCE_EXPECTED_MINUTES } from "./config.js";
 import { parseKeyholder, parseExternalRentalStore, parseDavids, parseDvcShop, fingerprint, formatListing, priceSummary, byId } from "./parsers.js";
 import { Storage, utcDay } from "./storage.js";
@@ -21,6 +22,10 @@ export default {
 
     if (url.pathname === "/" || url.pathname === "/health") {
       return statusResponse(env, store, url.pathname === "/");
+    }
+
+    if (url.pathname === "/publication-audit" && request.method === "GET") {
+      return json(await getDvcShopPublicationReport(env.DB, { limit: url.searchParams.get("limit") || 100 }));
     }
 
     if (url.pathname === "/diagnostics/daily-cadence" && request.method === "GET") {
@@ -251,6 +256,14 @@ async function processRentalStoreFast(env, store, rows) {
   const previous = await store.getSnapshot(key);
   assertInventoryHealthy(previous, rows, key);
   const current = byId(rows);
+  if (key === "dvc-shop") {
+    try {
+      await recordDvcShopObservations(env.DB, rows, previous);
+    } catch (error) {
+      // Never make an optional timing audit suppress a real reservation alert.
+      console.error("DVC Shop first-seen audit write failed", errorMessage(error));
+    }
+  }
 
   if (!previous) {
     await store.putSnapshot(key, current);
@@ -495,6 +508,10 @@ async function drainOutbox(env, store, limit = 20) {
         await markOutboxSent(env.DB,row.alert_key);
         try { await store.markAlertSent(row.alert_key); } catch (error) { console.error("legacy alert ledger update failed",errorMessage(error)); }
       }
+      if (valid[0].row.source === "dvc-shop") {
+        try { await recordDvcShopAlertSends(env.DB, valid.map(x => x.event)); }
+        catch (error) { console.error("DVC Shop delivery timing audit failed", errorMessage(error)); }
+      }
       let after;
       try { after = await store.incrementEmailCount(); } catch (error) { console.error("email count update failed",errorMessage(error)); after = 0; }
       sent++;
@@ -630,11 +647,12 @@ async function statusResponse(env, store, html) {
   const outboxCounts = (await env.DB.prepare("SELECT status, COUNT(*) AS count FROM alert_outbox GROUP BY status").all()).results || [];
   const outbox = Object.fromEntries(outboxCounts.map(item => [item.status, Number(item.count)]));
   const emailCount = await store.getEmailCount();
+  const publicationAudit = await getDvcShopPublicationReport(env.DB, { limit: 50 });
   const watchKeys = Object.keys(WATCHES);
   const watchActivity = await Promise.all(watchKeys.map(key => store.getMeta(`watch-events:${key}`)));
   const lastScheduled = await store.getMeta("last-scheduled");
   const lastScheduledStart = await store.getMeta("last-scheduled-start");
-  const degraded = healthWithStale.some(item => !item.ok || item.stale || item.consecutiveFailures >= 3) || (outbox.uncertain || 0) > 0;
+  const degraded = healthWithStale.some(item => !item.ok || item.stale || item.consecutiveFailures >= 3) || (outbox.uncertain || 0) > 0 || publicationAudit.summary.reviewNeeded > 0;
 
   const payload = {
     ok: !degraded,
@@ -654,6 +672,7 @@ async function statusResponse(env, store, html) {
       trigger: "Cloudflare Worker dispatches GitHub browser workflow",
       githubCronFallback: "15 minutes",
     },
+    publicationAudit,
     alertOutbox: { pending: outbox.pending || 0, sending: outbox.sending || 0,
       sent: outbox.sent || 0, uncertain: outbox.uncertain || 0 },
     emailUsageToday: {
@@ -688,6 +707,14 @@ async function statusResponse(env, store, html) {
   <p>Last added and last changed show when a matching reservation alert was successfully sent. Empty means no recorded alert since this feature was enabled.</p>
   <table><thead><tr><th>Watch</th><th>Interval</th><th>Last added</th><th>Last changed</th></tr></thead><tbody>${payload.watches.map(watch => `<tr><td>${escapeHtml(watch.title)}</td><td>${escapeHtml(watch.interval)}</td><td class="time" data-utc="${escapeHtml(watch.lastAddedAt || "")}">${escapeHtml(watch.lastAddedAt || "—")}</td><td class="time" data-utc="${escapeHtml(watch.lastChangedAt || "")}">${escapeHtml(watch.lastChangedAt || "—")}</td></tr>`).join("")}</tbody></table>
   <script>document.querySelectorAll(".time[data-utc]").forEach(cell => { const value = cell.dataset.utc; if (value) cell.textContent = new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "short", timeStyle: "short" }) + " ET"; });</script>
+  <h2>DVC Shop publication-to-notification audit</h2>
+  <p>Measures WordPress post publication → monitor first sighting → Brevo accepted alert. Historical listings cannot be timed retroactively. <a href="/publication-audit">Full JSON audit (up to 100 listings)</a>.</p>
+  <p>Monitoring since: ${escapeHtml(publicationAudit.enabledAt || "not started")} · Notified: ${publicationAudit.summary.notified} · Review needed: ${publicationAudit.summary.reviewNeeded} · Median delivery: ${publicationAudit.summary.medianNotificationMinutes ?? "n/a"} minutes</p>
+  <table><thead><tr><th>Reservation</th><th>Published (UTC)</th><th>First seen (UTC)</th><th>First sent (UTC)</th><th>Gap (min)</th><th>Audit status</th></tr></thead><tbody>${publicationAudit.rows.slice(0,25).map(r => `<tr>
+    <td><a href="https://rentals.dvcshop.com/wp-json/wp/v2/reservations/${encodeURIComponent(r.id)}">${escapeHtml(r.id)}</a></td>
+    <td>${escapeHtml(r.publishedAt || "—")}</td><td>${escapeHtml(r.firstSeenAt || "—")}</td>
+    <td>${escapeHtml(r.firstAlertSentAt || "—")}</td>
+    <td>${r.notificationMinutes ?? "—"}</td><td>${escapeHtml(r.state)}</td></tr>`).join("")}</tbody></table>
   <h2>Details</h2><pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre></body></html>`, {
     headers: { "content-type": "text/html;charset=utf-8" },
   });
