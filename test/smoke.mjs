@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { WATCHES, EMAIL_LIMITS } from "../src/config.js";
+import { normalizeBrowserRows } from "../src/index.js";
 import { parseKeyholder, parseDavids, parseDvcShop, fingerprint, formatListing } from "../src/parsers.js";
 
 assert.equal(WATCHES.rentalStoreNightly.match({ nightly: 200.99 }), true);
@@ -9,6 +10,7 @@ assert.equal(WATCHES.rentalStorePoints.match({ pointPrice: 12.00 }), false);
 assert.equal(WATCHES.rentalStorePoints.match({ pointPrice: 11.50, effectivePointPrice: 12.50 }), false);
 assert.equal(WATCHES.rentalStorePoints.match({ pointPrice: 12.50, effectivePointPrice: 11.50 }), true);
 assert.equal(WATCHES.rentalStoreAll.match({ nightly: 9999 }), true);
+assert.equal(Object.values(WATCHES).every(watch => watch.priceChanges === true), true, "Every watch must alert on price changes");
 assert.equal(WATCHES.davids.match({ nightly: 375.99, room: "Deluxe Studio", pointPrice: 24 }), true);
 assert.equal(WATCHES.davids.match({ nightly: 376.00, room: "Deluxe Studio", pointPrice: 24 }), false);
 assert.equal(WATCHES.davids.match({ nightly: 450, room: "Two Bedroom - Standard", pointPrice: 16.99 }), true);
@@ -69,5 +71,16 @@ assert.equal(dvcShop.length, 1);
 assert.equal(dvcShop[0].id, "584737");
 assert.equal(dvcShop[0].nightly, 200);
 assert.equal(WATCHES.dvcShop.match(dvcShop[0]), true);
+
+// Browser fallback and direct DVC-Rental must preserve the same price fields.
+const directDeal = {
+  id: "DVC10016", resort: "Boardwalk Villas", room: "Deluxe Studio · Garden/Pool View",
+  checkIn: "2026-12-15", checkOut: "2026-12-20", nights: 5,
+  total: 2302.56, points: 82, nightly: 460.512,
+  pointPrice: 28.08, listedPointPrice: 27, effectivePointPrice: 2302.56 / 82,
+};
+const [browserDeal] = normalizeBrowserRows([directDeal], "DVC-Rental");
+assert.equal(browserDeal.listedPointPrice, 27);
+assert.equal(fingerprint(directDeal), fingerprint(browserDeal), "Browser fallback must not invent price changes");
 
 console.log("DVC monitor smoke tests passed");
