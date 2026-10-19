@@ -36,6 +36,14 @@ Production alerts go to the notification-only Gmail account in `EMAIL_TO` and, w
 - The status page shows source last-check/last-success timestamps, failure counts, email usage, and last added/changed activity for each watch.
 - With notification Gmail + primary Gmail + the Pushover email gateway, each alert can consume three Brevo recipient deliveries. The monitor warns at 70 alert emails/day, pauses low-priority emails at 82, and preserves bargain-alert capacity until a hard safety cutoff of 96 alert emails/day, keeping the theoretical maximum below 300 recipient deliveries/day.
 
+## All-watch notification timing
+
+- Open `/timing-audit` for a **read-only timing report across every reservation source**; filter using `?source=dvc-rental-store`, `davids`, `dvc-rental`, `dvc-shop`, or `dvcreservations-rare-finds`. The dashboard also displays a recent-alert timing table and per-site medians.
+- For the standard four outbox-based sources, the report reads existing `alert_outbox.created_at` (**qualifying event detected/queued**) and `updated_at` when the status became `sent` (**Brevo acceptance**). Rare Finds uses the existing legacy `alerts.created_at` and `sent_at` records (retained approximately 60 days), which do not preserve the per-event NEW-versus-CHANGED classification.
+- DVC Shop can additionally report per-listing WordPress `date_gmt` publication metadata for NEW alerts. Other sources' public feeds have **no verified reservation-level publication timestamps**; show their publication as **unavailable**, not as an invented time.
+- Repricing events can be measured from detection to provider acceptance, **not** from when the website actually changed the price (no authoritative edit timestamp verified). The website may be scraped later than publication, and Brevo acceptance is not proof Gmail delivered the message at that instant.
+- No additional HTTP checks, source polling, email recipients or write-heavy history are introduced. The reporting queries are indexed and do not modify any reservation snapshots or notification thresholds. Metrics summarize the most recent sampled alerts, not the entire lifetime of the monitor.
+
 ## DVC Shop publication-to-alert timing audit
 
 - A separate, read-only five-minute check (staggered two minutes after each five-minute boundary) requests the **100 newest reservation posts** from DVC Shop's public WordPress API, using each listing's `date_gmt`.
