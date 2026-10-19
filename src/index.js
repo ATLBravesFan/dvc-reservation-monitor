@@ -256,15 +256,6 @@ async function processRentalStoreFast(env, store, rows) {
   const previous = await store.getSnapshot(key);
   assertInventoryHealthy(previous, rows, key);
   const current = byId(rows);
-  if (key === "dvc-shop") {
-    try {
-      await recordDvcShopObservations(env.DB, rows, previous);
-    } catch (error) {
-      // Never make an optional timing audit suppress a real reservation alert.
-      console.error("DVC Shop first-seen audit write failed", errorMessage(error));
-    }
-  }
-
   if (!previous) {
     await store.putSnapshot(key, current);
     return { baseline: true, alerts: 0 };
@@ -416,6 +407,15 @@ async function processStandardWatch(env, store, key, watch, rows) {
   const previous = await store.getSnapshot(key);
   assertInventoryHealthy(previous, rows, key);
   const current = byId(rows);
+  if (key === "dvc-shop") {
+    try {
+      await recordDvcShopObservations(env.DB, rows, previous);
+    } catch (error) {
+      // Never make an optional timing audit suppress a real reservation alert.
+      console.error("DVC Shop first-seen audit write failed", errorMessage(error));
+    }
+  }
+
 
   if (!previous) {
     await store.putSnapshot(key, current);
