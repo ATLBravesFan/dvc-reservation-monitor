@@ -1,5 +1,6 @@
 import { boundedFetch } from "./bounded-fetch.js";
 import { dailyCadenceReport } from "./daily-cadence-report.js";
+import { getAllWatchTimingReport } from "./all-watch-timing.js";
 import { recordDvcShopObservations, recordDvcShopAlertSends, getDvcShopPublicationReport } from "./dvc-shop-publication-audit.js";
 import { URLS, WATCHES, EMAIL_LIMITS, SOURCE_EXPECTED_MINUTES } from "./config.js";
 import { parseKeyholder, parseExternalRentalStore, parseDavids, parseDvcShop, fingerprint, formatListing, priceSummary, byId } from "./parsers.js";
@@ -22,6 +23,17 @@ export default {
 
     if (url.pathname === "/" || url.pathname === "/health") {
       return statusResponse(env, store, url.pathname === "/");
+    }
+
+    if (url.pathname === "/timing-audit" && request.method === "GET") {
+      try {
+        return json(await getAllWatchTimingReport(env.DB, {
+          source: url.searchParams.get("source") || null,
+          limit: url.searchParams.get("limit") || 100,
+        }));
+      } catch (error) {
+        return json({ ok: false, error: errorMessage(error) }, 400);
+      }
     }
 
     if (url.pathname === "/publication-audit" && request.method === "GET") {
@@ -648,6 +660,7 @@ async function statusResponse(env, store, html) {
   const outbox = Object.fromEntries(outboxCounts.map(item => [item.status, Number(item.count)]));
   const emailCount = await store.getEmailCount();
   const publicationAudit = await getDvcShopPublicationReport(env.DB, { limit: 50 });
+  const allWatchTiming = await getAllWatchTimingReport(env.DB, { limit: 50 });
   const watchKeys = Object.keys(WATCHES);
   const watchActivity = await Promise.all(watchKeys.map(key => store.getMeta(`watch-events:${key}`)));
   const lastScheduled = await store.getMeta("last-scheduled");
@@ -673,6 +686,7 @@ async function statusResponse(env, store, html) {
       githubCronFallback: "15 minutes",
     },
     publicationAudit,
+    allWatchTiming,
     alertOutbox: { pending: outbox.pending || 0, sending: outbox.sending || 0,
       sent: outbox.sent || 0, uncertain: outbox.uncertain || 0 },
     emailUsageToday: {
@@ -707,6 +721,11 @@ async function statusResponse(env, store, html) {
   <p>Last added and last changed show when a matching reservation alert was successfully sent. Empty means no recorded alert since this feature was enabled.</p>
   <table><thead><tr><th>Watch</th><th>Interval</th><th>Last added</th><th>Last changed</th></tr></thead><tbody>${payload.watches.map(watch => `<tr><td>${escapeHtml(watch.title)}</td><td>${escapeHtml(watch.interval)}</td><td class="time" data-utc="${escapeHtml(watch.lastAddedAt || "")}">${escapeHtml(watch.lastAddedAt || "—")}</td><td class="time" data-utc="${escapeHtml(watch.lastChangedAt || "")}">${escapeHtml(watch.lastChangedAt || "—")}</td></tr>`).join("")}</tbody></table>
   <script>document.querySelectorAll(".time[data-utc]").forEach(cell => { const value = cell.dataset.utc; if (value) cell.textContent = new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", dateStyle: "short", timeStyle: "short" }) + " ET"; });</script>
+  <h2>All-watch detection → notification timing</h2>
+  <p>Read-only timing comparison for all five reservation sites. Other than DVC Shop, public per-reservation publication timestamps have not been verified. Detection time is when a qualifying event entered the alert queue, and sent time is Brevo acceptance, not Gmail arrival. <a href="/timing-audit">Detailed JSON report</a>.</p>
+  <table><thead><tr><th>Website</th><th>Recent alerts</th><th>Median detected → sent</th><th>Over 12 min</th><th>Publication metadata</th></tr></thead><tbody>${allWatchTiming.sources.map(watch => `<tr><td>${escapeHtml(watch.name)}</td><td>${watch.sampledEvents}</td><td>${watch.medianDetectionToSendMinutes ?? "—"} min</td><td>${watch.over12Minutes}</td><td>${watch.publicationTime === "wordpress-post-date" ? "WordPress post date" : "Unavailable"}</td></tr>`).join("")}</tbody></table>
+  <h3>Most recent timed alerts</h3>
+  <table><thead><tr><th>Website</th><th>Reservation</th><th>Event</th><th>Published UTC</th><th>Event detected UTC</th><th>Sent UTC</th><th>Detected → sent</th><th>Published → sent</th></tr></thead><tbody>${allWatchTiming.rows.slice(0,20).map(r => `<tr><td>${escapeHtml(r.sourceName)}</td><td>${escapeHtml(r.listingId)}</td><td>${escapeHtml(r.eventType)}</td><td>${escapeHtml(r.publicationAt || "—")}</td><td>${escapeHtml(r.eventDetectedAt || "—")}</td><td>${escapeHtml(r.sentAt || "—")}</td><td>${r.detectionToSendMinutes ?? "—"} min</td><td>${r.publicationToSendMinutes ?? "—"}</td></tr>`).join("")}</tbody></table>
   <h2>DVC Shop publication-to-notification audit</h2>
   <p>Measures WordPress post publication → monitor first sighting → Brevo accepted alert. Historical listings cannot be timed retroactively. <a href="/publication-audit">Full JSON audit (up to 100 listings)</a>.</p>
   <p>Monitoring since: ${escapeHtml(publicationAudit.enabledAt || "not started")} · Notified: ${publicationAudit.summary.notified} · Review needed: ${publicationAudit.summary.reviewNeeded} · Median delivery: ${publicationAudit.summary.medianNotificationMinutes ?? "n/a"} minutes</p>
