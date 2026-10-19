@@ -40,7 +40,7 @@ const db={prepare(sql){queries.push(sql);return {bind(...args){return {
   throw Error("Unexpected query: "+sql);
  },
  async run(){writes++;throw Error("Timing audit must be read-only");},
- }};}}};
+ };}}};
 const report=await getAllWatchTimingReport(db,{limit:30});
 assert.equal(report.sampledEvents,5);
 assert.equal(report.sources.length,5);
