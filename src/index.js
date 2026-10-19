@@ -378,6 +378,23 @@ async function pollSlowerHttpSources(env, store) {
   };
 }
 
+// DVC-Rental's direct feed includes a site-listed per-point rate that older
+// browser snapshots omitted. A newly populated metadata field must not trigger
+// a fake price-change alert when the customer price did not move.
+export function dvcRentalComparableFingerprint(row) {
+  const total = Number(row?.total);
+  const points = Number(row?.points);
+  const effective = Number.isFinite(total) && Number.isFinite(points) && points > 0
+    ? total / points
+    : (Number.isFinite(row?.effectivePointPrice) ? row.effectivePointPrice : row?.pointPrice);
+  return fingerprint({
+    ...row,
+    pointPrice: effective,
+    listedPointPrice: effective,
+    effectivePointPrice: effective,
+  });
+}
+
 export function newlyAvailableDvcShopListing(previous, current) {
   return !WATCHES.dvcShop.match(previous) && WATCHES.dvcShop.match(current);
 }
@@ -404,7 +421,10 @@ async function processStandardWatch(env, store, key, watch, rows) {
       continue;
     }
 
-    if (fingerprint(old) === fingerprint(listing)) continue;
+    const unchanged = key === "dvc-rental"
+      ? dvcRentalComparableFingerprint(old) === dvcRentalComparableFingerprint(listing)
+      : fingerprint(old) === fingerprint(listing);
+    if (unchanged) continue;
     const oldMatches = bargainMatches(old);
     const gainedBargain = matches.some(match => !oldMatches.includes(match));
     if (watch.priceChanges || gainedBargain) {
