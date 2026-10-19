@@ -66,13 +66,13 @@ export const WATCHES = {
   dvcRental: {
     title: "DVC-Rental New Confirmed Reservations",
     interval: "5 minutes",
-    priceChanges: false,
+    priceChanges: true,
     match: () => true,
   },
   dvcShop: {
     title: "DVC Shop",
     interval: "5 minutes",
-    priceChanges: false,
+    priceChanges: true,
     match: r => !r.status || /available/i.test(r.status),
   },
   rareFinds: {
