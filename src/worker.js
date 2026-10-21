@@ -326,6 +326,7 @@ async function recoverStaleDvcRentalBrowser(env, now) {
 // Mirrors the existing watchdog's overdue policy. Browser dispatch acceptance
 // is not evidence of ingestion; the regular browser workflow remains intact.
 const RECOVERY_INTERVALS = {
+  "rental-store-api": [1, "rental-store"],
   "dvc-shop": [3, "dvc-shop"],
   "davids": [8, "davids"],
   "rental-store-all": [12, "rental-store-all"],
