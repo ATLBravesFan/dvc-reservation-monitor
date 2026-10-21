@@ -327,6 +327,7 @@ async function recoverStaleDvcRentalBrowser(env, now) {
 // is not evidence of ingestion; the regular browser workflow remains intact.
 const RECOVERY_INTERVALS = {
   "rental-store-api": [1, "rental-store"],
+  "dvc-rental-direct": [5, "dvc-rental-direct"],
   "dvc-shop": [3, "dvc-shop"],
   "davids": [8, "davids"],
   "rental-store-all": [12, "rental-store-all"],
@@ -346,6 +347,12 @@ async function recoverOverdueSources(env, now) {
       const graceMinutes = source === "dvcreservations-rare-finds" ? 5 : 10;
       if (Number.isFinite(last) && now.getTime() - last < (expectedMinutes + graceMinutes) * 60000) continue;
       try {
+        if (mode === "dvc-rental-direct") {
+          const result = await runDvcRentalDirect(env, now);
+          if (!result?.ok) throw new Error(`Recovery ${mode} failed: ${JSON.stringify(result).slice(0,350)}`);
+          recovered.push(source);
+          continue;
+        }
         if (mode === "rare-finds") {
           const result = await runRareFindsWithFallback(env, now);
           if (!result?.ok) throw new Error(`Recovery ${mode} failed: ${JSON.stringify(result).slice(0,350)}`);
