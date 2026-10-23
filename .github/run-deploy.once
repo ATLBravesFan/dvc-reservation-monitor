@@ -20,3 +20,4 @@ Fix DVC Shop first-seen timestamp hook on standard watch and verify publication 
 Deploy read-only all-website DVC detection-to-notification timing audit and query indexes. 2026-10-19.
 Redeploy all-watch timing audit after fixing syntax in regression test fixture. 2026-10-19.
 Deploy per-website fair sampling for DVC timing dashboards and D1 source-timing index. 2026-10-19.
+Deploy authenticated daily D1 cadence export, New York date/DST correctness, and Cloudflare-triggered audit (PR #14). 2026-10-23.
