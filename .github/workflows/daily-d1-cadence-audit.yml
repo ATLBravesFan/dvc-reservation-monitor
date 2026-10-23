@@ -11,6 +11,11 @@ on:
   # Cloudflare normally dispatches at 08:20 Eastern every day.
   schedule:
     - cron: "19 14 * * *"
+  # Exercise authenticated D1 export when its workflow definition changes.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/daily-d1-cadence-audit.yml"
 
 permissions:
   contents: read
