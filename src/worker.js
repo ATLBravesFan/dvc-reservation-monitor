@@ -7,6 +7,7 @@ import { Storage } from "./storage.js";
 import { runDvcShopPublicationAudit } from "./dvc-shop-publication-audit.js";
 import { withLease } from "./execution-lease.js";
 import { dispatchDailyCadenceAudit } from "./daily-audit-dispatch.js";
+import { RECOVERY_INTERVALS, isOverdue } from "./recovery-policy.js";
 
 const GITHUB_REPO = "ATLBravesFan/dvc-reservation-monitor";
 const DVC_RENTAL_WORKFLOW = "dvc-rental-browser.yml";
@@ -333,15 +334,6 @@ async function recoverStaleDvcRentalBrowser(env, now) {
 
 // Mirrors the existing watchdog's overdue policy. Browser dispatch acceptance
 // is not evidence of ingestion; the regular browser workflow remains intact.
-const RECOVERY_INTERVALS = {
-  "rental-store-api": [1, "rental-store"],
-  "dvc-rental-direct": [5, "dvc-rental-direct"],
-  "dvc-shop": [3, "dvc-shop"],
-  "davids": [8, "davids"],
-  "rental-store-all": [12, "rental-store-all"],
-  "rental-store-website-dispatch": [8, "website-backup-dispatch"],
-  "dvcreservations-rare-finds": [15, "rare-finds"],
-};
 
 async function recoverOverdueSources(env, now) {
   const store = new Storage(env.DB);
@@ -349,11 +341,9 @@ async function recoverOverdueSources(env, now) {
     const health = await store.allHealth();
     const recovered = [];
     const failures = [];
-    for (const [source, [expectedMinutes, mode]] of Object.entries(RECOVERY_INTERVALS)) {
+    for (const [source, [, mode]] of Object.entries(RECOVERY_INTERVALS)) {
       const row = health.find(item => item.source === source);
-      const last = Date.parse(row?.lastSuccessAt || "");
-      const graceMinutes = source === "dvcreservations-rare-finds" ? 5 : 10;
-      if (Number.isFinite(last) && now.getTime() - last < (expectedMinutes + graceMinutes) * 60000) continue;
+      if (!isOverdue(source, row?.lastSuccessAt, now)) continue;
       try {
         if (mode === "dvc-rental-direct") {
           const result = await runDvcRentalDirect(env, now);
