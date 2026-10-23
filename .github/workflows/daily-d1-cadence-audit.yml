@@ -1,0 +1,42 @@
+name: DVC verified D1 daily cadence audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      day:
+        description: "Completed America/New_York day to audit (YYYY-MM-DD); defaults to yesterday"
+        required: false
+        type: string
+  # Independent best-effort fallback if Cloudflare dispatching stops.
+  # Cloudflare normally dispatches at 08:20 Eastern every day.
+  schedule:
+    - cron: "19 14 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dvc-d1-daily-cadence-audit
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fetch authenticated D1 cadence and publish report
+        env:
+          DVC_MONITOR_BASE_URL: ${{ secrets.DVC_MONITOR_BASE_URL }}
+          DVC_MONITOR_ADMIN_TOKEN: ${{ secrets.DVC_MONITOR_ADMIN_TOKEN }}
+          DVC_AUDIT_DAY: ${{ inputs.day }}
+        run: node scripts/export-daily-cadence.mjs
+      - name: Store daily D1 cadence JSON for later review
+        uses: actions/upload-artifact@v4
+        with:
+          name: dvc-d1-cadence-${{ github.run_id }}
+          path: daily-d1-cadence.json
+          retention-days: 30

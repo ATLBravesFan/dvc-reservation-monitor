@@ -6,6 +6,7 @@ import { ingestRareFindsHtml, recordRareFindsBackupFailure, runRareFinds } from 
 import { Storage } from "./storage.js";
 import { runDvcShopPublicationAudit } from "./dvc-shop-publication-audit.js";
 import { withLease } from "./execution-lease.js";
+import { dispatchDailyCadenceAudit } from "./daily-audit-dispatch.js";
 
 const GITHUB_REPO = "ATLBravesFan/dvc-reservation-monitor";
 const DVC_RENTAL_WORKFLOW = "dvc-rental-browser.yml";
@@ -43,6 +44,13 @@ export default {
     if (minute % 15 === 0) {
       ctx.waitUntil(runRareFindsWithFallback(env, now).catch(error =>
         console.error("Rare Finds primary+fallback failed", error instanceof Error ? error.message : String(error))));
+    }
+
+    // Record each previous full New York day in authenticated GitHub audit logs.
+    // Dispatch retries are throttled and deduplicated in D1; no watch cadence changes.
+    if (minute % 5 === 0 && (now.getUTCHours() === 12 || now.getUTCHours() === 13)) {
+      ctx.waitUntil(dispatchDailyCadenceAudit(env, new Date()).catch(error =>
+        console.error("daily D1 cadence audit dispatch failed", error instanceof Error ? error.message : String(error))));
     }
 
     // Recover overdue HTTP sources even if GitHub scheduled Actions are delayed.
