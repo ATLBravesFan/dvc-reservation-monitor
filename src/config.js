@@ -106,5 +106,6 @@ export const SOURCE_EXPECTED_MINUTES = {
   "dvc-rental": 15,
   "dvc-rental-direct": 8,
   "dvc-rental-dispatch": 13,
+  "dvc-rental-browser-ingest": 18,
   "dvcreservations-rare-finds": 20,
 };
