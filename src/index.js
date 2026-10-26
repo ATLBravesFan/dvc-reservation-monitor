@@ -51,12 +51,12 @@ export default {
 
     if (url.pathname === "/diagnostics/executions" && request.method === "GET") {
       if (!authorized(request, env.ADMIN_TOKEN)) return new Response("Unauthorized", { status: 401 });
-      const sources = ["dvc-shop", "davids", "rental-store-api"];
+      const sources = ["dvc-shop", "davids", "rental-store-api", "dvc-rental", "dvc-rental-direct", "dvc-rental-browser-ingest"];
       const leases = (await env.DB.prepare(
-        "SELECT source,acquired_at,expires_at FROM execution_leases WHERE source IN ('dvc-shop','davids','rental-store-api') ORDER BY source"
+        "SELECT source,acquired_at,expires_at FROM execution_leases WHERE source IN ('dvc-shop','davids','rental-store-api','dvc-rental') ORDER BY source"
       ).all()).results || [];
       const history = (await env.DB.prepare(
-        "SELECT source,started_at,finished_at,outcome,error FROM execution_history WHERE source IN ('dvc-shop','davids','rental-store-api') ORDER BY started_at DESC LIMIT 90"
+        "SELECT source,started_at,finished_at,outcome,error FROM execution_history WHERE source IN ('dvc-shop','davids','rental-store-api','dvc-rental') ORDER BY started_at DESC LIMIT 90"
       ).all()).results || [];
       const health = (await store.allHealth()).filter(row => sources.includes(row.source));
       return json({ checkedAt: new Date().toISOString(), health, leases, history });
