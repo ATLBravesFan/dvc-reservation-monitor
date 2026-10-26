@@ -86,8 +86,32 @@ export default {
       if (!Array.isArray(rows) || !rows.length) return json({ ok: false, error: "Expected non-empty listings array" }, 400);
       const normalized = normalizeBrowserRows(rows, "DVC-Rental");
       if (!normalized.length) return json({ ok: false, error: "No usable DVC-Rental reservations" }, 400);
+      const browserIngest = request.headers.get("X-DVC-Ingest-Origin") !== "direct";
+
+      // The primary check and browser backup share the same D1 snapshot/lease.
+      // When the browser has verified the exact inventory we already saved,
+      // no mutation or lease acquisition is necessary. This prevents a healthy
+      // redundant scrape from failing for minutes with HTTP 409. Never use a
+      // recent success timestamp alone: new/changed rows must still ingest.
+      if (browserIngest && dvcRentalInventoryMatchesSnapshot(await store.getSnapshot("dvc-rental"), normalized)) {
+        await store.recordHealth("dvc-rental-browser-ingest", true,
+          { count: normalized.length, alreadyCurrent: true }, null);
+        return json({ ok: true, count: normalized.length, alreadyCurrent: true, alerts: 0 });
+      }
+
       const result = await tracked(env, store, "dvc-rental", () => processStandardWatch(env, store, "dvc-rental", WATCHES.dvcRental, normalized));
-      if (!result?.skipped && request.headers.get("X-DVC-Ingest-Origin") !== "direct") {
+
+      // A concurrent primary check may have finished after our first snapshot
+      // read. Only acknowledge a skipped lease when its committed snapshot now
+      // matches every browser reservation (including the price fingerprints).
+      if (browserIngest && result?.skipped &&
+          dvcRentalInventoryMatchesSnapshot(await store.getSnapshot("dvc-rental"), normalized)) {
+        await store.recordHealth("dvc-rental-browser-ingest", true,
+          { count: normalized.length, alreadyCurrent: true }, null);
+        return json({ ok: true, count: normalized.length, alreadyCurrent: true, alerts: 0 });
+      }
+
+      if (!result?.skipped && browserIngest) {
         await store.recordHealth("dvc-rental-browser-ingest", true, { count: normalized.length }, null);
       }
       return json(result?.skipped ? { ok: false, ...result } : { ok: true, ...result }, result?.skipped ? 409 : 200);
@@ -409,6 +433,24 @@ export function dvcRentalComparableFingerprint(row) {
     listedPointPrice: effective,
     effectivePointPrice: effective,
   });
+}
+
+// A backup is redundant only when it confirms the same *complete* saved
+// inventory. A new reservation, removal, changed dates or user-visible price
+// must continue through the normal ingest/alert path. Pure helper for tests.
+export function dvcRentalInventoryMatchesSnapshot(snapshot, rows) {
+  if (!snapshot || !Array.isArray(rows) || !rows.length) return false;
+  const ids = Object.keys(snapshot);
+  if (ids.length !== rows.length) return false;
+  const seen = new Set();
+  for (const row of rows) {
+    const id = String(row?.id || "").trim();
+    if (!id || seen.has(id) || !Object.prototype.hasOwnProperty.call(snapshot, id)) return false;
+    seen.add(id);
+    if (dvcRentalComparableFingerprint(snapshot[id]) !== dvcRentalComparableFingerprint(row)) return false;
+    if (String(snapshot[id]?.status || "Available") !== String(row.status || "Available")) return false;
+  }
+  return true;
 }
 
 export function newlyAvailableDvcShopListing(previous, current) {
