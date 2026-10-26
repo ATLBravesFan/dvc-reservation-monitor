@@ -28,7 +28,7 @@ Production alerts go to the notification-only Gmail account in `EMAIL_TO` and, w
 
 - Cloudflare D1 stores snapshots, atomic alert claims/deduplication, health, and daily email counters.
 - Rental Store API, all-reservations watch, and website backup share one alert namespace, preventing duplicate emails for the same reservation and price fingerprint.
-- DVC-Rental direct and browser paths share one snapshot and alert namespace, so the browser fallback does not create duplicate alerts for the same reservation fingerprint.
+- DVC-Rental direct and browser paths share one snapshot and alert namespace, so the browser fallback does not create duplicate alerts for the same reservation fingerprint. A browser scrape of the exact inventory already committed by the primary finishes successfully without acquiring a competing lock; any new, removed, or repriced reservations still require normal ingestion. A stalled or stale browser backup is surfaced separately in health.
 - Alert claims expire if a Worker crashes before email delivery, so the event can retry later.
 - A source failure or zero-result parser failure does not replace a good snapshot.
 - Snapshots advance only after alerts are successfully delivered or there is nothing new to deliver.
