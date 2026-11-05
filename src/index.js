@@ -402,7 +402,9 @@ async function pollDavids(env, store) {
 async function pollDvcShop(env, store) {
   try {
     return await tracked(env, store, "dvc-shop", async () => {
-      const rows = parseDvcShop(await fetchText(URLS.dvcShop));
+      // This large server-rendered inventory can respond more slowly than the lightweight feeds.
+      // Allow extra time for DVC Shop only; preserve the default timeout for other sources.
+      const rows = parseDvcShop(await fetchText(URLS.dvcShop, 30000));
       if (!rows.length) throw new Error("DVC Shop parser returned zero reservations");
       return processStandardWatch(env, store, "dvc-shop", WATCHES.dvcShop, rows);
     });
@@ -811,8 +813,9 @@ function numberOrNull(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-async function fetchText(url) {
+async function fetchText(url, timeoutMs = 12000) {
   const response = await boundedFetch(url, {
+    timeoutMs,
     headers: {
       Accept: "text/html,application/xhtml+xml",
       "User-Agent": "Mozilla/5.0 (compatible; DVC-Monitor/2.0)",
