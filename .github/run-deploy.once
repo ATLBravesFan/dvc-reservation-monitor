@@ -23,3 +23,4 @@ Deploy per-website fair sampling for DVC timing dashboards and D1 source-timing 
 Deploy authenticated daily D1 cadence export, New York date/DST correctness, and Cloudflare-triggered audit (PR #14). 2026-10-23.
 Deploy faster five-minute Cloudflare source recovery and overdue Rental Store all checks (PR #15). 2026-10-23.
 Deploy safe DVC-Rental idempotent browser ingestion and backup health telemetry. 2026-10-26.
+Deploy DVC Shop source-only 30s inventory timeout after verified 12s origin timeouts, preserving other watches and five-minute cadence. 2026-11-05.
