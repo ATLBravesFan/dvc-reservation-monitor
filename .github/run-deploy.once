@@ -25,3 +25,4 @@ Deploy faster five-minute Cloudflare source recovery and overdue Rental Store al
 Deploy safe DVC-Rental idempotent browser ingestion and backup health telemetry. 2026-10-26.
 Deploy DVC Shop source-only 30s inventory timeout after verified 12s origin timeouts, preserving other watches and five-minute cadence. 2026-11-05.
 Deploy source-specific 30-second David's HTTP timeout after verified consecutive 12-second origin timeouts. 2026-11-09.
+Deploy David's single transient retry, durable incident cooldown, and sustained recovery verification. 2026-11-09.
