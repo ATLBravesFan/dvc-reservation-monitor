@@ -32,7 +32,7 @@ Production alerts go to the notification-only Gmail account in `EMAIL_TO` and, w
 - Alert claims expire if a Worker crashes before email delivery, so the event can retry later.
 - A source failure or zero-result parser failure does not replace a good snapshot.
 - Snapshots advance only after alerts are successfully delivered or there is nothing new to deliver.
-- Three consecutive source failures trigger a warning email.
+- Three consecutive source failures trigger a warning email. For David's, transient upstream timeouts and Cloudflare 522/5xx responses receive one bounded retry (30 seconds first, 15 seconds second), with no change to its five-minute schedule. David's warnings are grouped into persistent incidents: three failed checks open an outage, three successful checks spanning at least ten minutes confirm recovery, and a six-hour cooldown suppresses repeat warning emails if the source flaps. Reservation snapshots remain intact on failed checks.
 - The status page shows source last-check/last-success timestamps, failure counts, email usage, and last added/changed activity for each watch.
 - With notification Gmail + primary Gmail + the Pushover email gateway, each alert can consume three Brevo recipient deliveries. The monitor warns at 70 alert emails/day, pauses low-priority emails at 82, and preserves bargain-alert capacity until a hard safety cutoff of 96 alert emails/day, keeping the theoretical maximum below 300 recipient deliveries/day.
 
