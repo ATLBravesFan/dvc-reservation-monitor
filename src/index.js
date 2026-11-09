@@ -242,8 +242,8 @@ async function updateDavidsIncident(env, store, { ok, consecutiveFailures = 0, e
     if (!next.changed) return;
 
     if (next.notification === "warning") {
-      // Only persist an alerted incident after successful delivery, so a
-      // definite email rejection can be retried on the next failed check.
+      // Persist only after successful delivery, avoiding duplicate warnings
+      // if an earlier upstream check failed but the email was accepted.
       await sendSystemEmail(
         env, store, "DVC Monitor warning — davids failing",
         `David's has failed ${consecutiveFailures} consecutive checks despite an automatic retry. Latest error: ${error}\n\nThe previous successful inventory remains stored. Open the Worker status page for current details.`,
