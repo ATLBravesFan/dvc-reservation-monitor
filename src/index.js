@@ -1,4 +1,5 @@
 import { boundedFetch } from "./bounded-fetch.js";
+import { nextDavidsIncident, withDavidsRetry } from "./davids-reliability.js";
 import { dailyCadenceReport } from "./daily-cadence-report.js";
 import { getAllWatchTimingReport } from "./all-watch-timing.js";
 import { recordDvcShopObservations, recordDvcShopAlertSends, getDvcShopPublicationReport } from "./dvc-shop-publication-audit.js";
@@ -209,11 +210,14 @@ async function tracked(env, store, source, fn) {
   try {
     const value = await fn();
     await store.recordHealth(source, true, summarizeForHealth(value), null);
+    if (source === "davids") await updateDavidsIncident(env, store, { ok: true });
     return value;
   } catch (error) {
     const message = errorMessage(error);
     const health = await store.recordHealth(source, false, null, message);
-    if (health.consecutiveFailures === 3) {
+    if (source === "davids") {
+      await updateDavidsIncident(env, store, { ok: false, consecutiveFailures: health.consecutiveFailures, error: message });
+    } else if (health.consecutiveFailures === 3) {
       try {
         await sendSystemEmail(
           env,
@@ -228,6 +232,40 @@ async function tracked(env, store, source, fn) {
     throw error;
   }
   });
+}
+
+async function updateDavidsIncident(env, store, { ok, consecutiveFailures = 0, error = null }) {
+  try {
+    const key = "source-incident:davids";
+    const previous = await store.getMeta(key);
+    const next = nextDavidsIncident(previous, { ok, consecutiveFailures, at: new Date().toISOString() });
+    if (!next.changed) return;
+
+    if (next.notification === "warning") {
+      // Persist only after successful delivery, avoiding duplicate warnings
+      // if an earlier upstream check failed but the email was accepted.
+      await sendSystemEmail(
+        env, store, "DVC Monitor warning — davids failing",
+        `David's has failed ${consecutiveFailures} consecutive checks despite an automatic retry. Latest error: ${error}\n\nThe previous successful inventory remains stored. Open the Worker status page for current details.`,
+      );
+      await store.putMeta(key, next.state);
+      return;
+    }
+
+    // Never let a recovery email error mark a successful reservation poll as failed.
+    await store.putMeta(key, next.state);
+    if (next.notification === "recovery") {
+      try {
+        await sendSystemEmail(env, store, "DVC Monitor recovered — davids",
+          "David's has completed three successful checks across at least ten minutes. Normal reservation monitoring is restored.");
+      } catch (error) {
+        console.error("David's recovery email failed", errorMessage(error));
+      }
+    }
+  } catch (error) {
+    // Health and reservation processing must remain independent of notification failures.
+    console.error("David's incident notification failed", errorMessage(error));
+  }
 }
 
 async function dispatchRentalStoreWebsiteBackup(env) {
@@ -390,9 +428,9 @@ async function processRentalStoreWebsite(env, store, rows) {
 async function pollDavids(env, store) {
   try {
     return await tracked(env, store, "davids", async () => {
-      // David's server-rendered inventory can occasionally exceed the 12s
-      // default request limit. Keep this longer budget source-specific.
-      const rows = parseDavids(await fetchText(URLS.davids, 30000));
+      // Retry only transient upstream failures. A successful retry counts as
+      // a normal successful check; real outages still reach health reporting.
+      const rows = parseDavids(await withDavidsRetry(timeoutMs => fetchText(URLS.davids, timeoutMs)));
       if (!rows.length) throw new Error("David's parser returned zero reservations");
       return processStandardWatch(env, store, "davids", WATCHES.davids, rows);
     });
@@ -823,7 +861,12 @@ async function fetchText(url, timeoutMs = 12000) {
       "User-Agent": "Mozilla/5.0 (compatible; DVC-Monitor/2.0)",
     },
   });
-  if (!response.ok) throw new Error(`${url} ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(`${url} ${response.status}`);
+    error.status = response.status;
+    await response.body?.cancel().catch(() => {});
+    throw error;
+  }
   return response.text();
 }
 
