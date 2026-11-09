@@ -390,7 +390,9 @@ async function processRentalStoreWebsite(env, store, rows) {
 async function pollDavids(env, store) {
   try {
     return await tracked(env, store, "davids", async () => {
-      const rows = parseDavids(await fetchText(URLS.davids));
+      // David's server-rendered inventory can occasionally exceed the 12s
+      // default request limit. Keep this longer budget source-specific.
+      const rows = parseDavids(await fetchText(URLS.davids, 30000));
       if (!rows.length) throw new Error("David's parser returned zero reservations");
       return processStandardWatch(env, store, "davids", WATCHES.davids, rows);
     });
@@ -403,7 +405,7 @@ async function pollDvcShop(env, store) {
   try {
     return await tracked(env, store, "dvc-shop", async () => {
       // This large server-rendered inventory can respond more slowly than the lightweight feeds.
-      // Allow extra time for DVC Shop only; preserve the default timeout for other sources.
+      // Allow extra time here without changing the default timeout for lightweight sources.
       const rows = parseDvcShop(await fetchText(URLS.dvcShop, 30000));
       if (!rows.length) throw new Error("DVC Shop parser returned zero reservations");
       return processStandardWatch(env, store, "dvc-shop", WATCHES.dvcShop, rows);
