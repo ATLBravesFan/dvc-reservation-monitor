@@ -19,6 +19,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Probe alternate-network request and canonical URL safely
+        run: node scripts/probe-davids.mjs
       - name: Compare sanitized D1 failure categories before and after retry rollout
         run: node scripts/diagnose-davids-d1.mjs
         env:
