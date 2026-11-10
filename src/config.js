@@ -23,7 +23,7 @@ export const URLS = {
     url.searchParams.set("maxTotalPrice", "150000");
     return url.toString();
   },
-  davids: "https://dvcrequest.com/dvc-guests/confirmed-reservations-for-rent/",
+  davids: "https://dvcrequest.com/dvc-guests/confirmed-reservations-for-rent",
   dvcRental: "https://dvc-rental.com/deals/",
   dvcShop: "https://rentals.dvcshop.com/confirmed-reservations/",
   rareFinds: "https://dvcreservations.com/rarefinds.php",
