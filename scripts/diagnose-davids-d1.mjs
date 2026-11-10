@@ -43,6 +43,8 @@ function classify(message) {
   const s = String(message);
   const status = s.match(/(?:^|[^\d])(4\d\d|5\d\d)(?:[^\d]|$)/);
   if (status) return "HTTP " + status[1];
+  const elapsed = /HTTP timeout after (\\d+)ms/i.exec(s);
+  if (elapsed) return "timeout " + elapsed[1] + "ms";
   if (/timeout|aborted|AbortError/i.test(s)) return "timeout";
   if (/fetch failed|network error|ECONNRESET|socket hang up/i.test(s)) return "network";
   if (/parser|zero reservations|parse/i.test(s)) return "parser/empty inventory";
