@@ -26,3 +26,4 @@ Deploy safe DVC-Rental idempotent browser ingestion and backup health telemetry.
 Deploy DVC Shop source-only 30s inventory timeout after verified 12s origin timeouts, preserving other watches and five-minute cadence. 2026-11-05.
 Deploy source-specific 30-second David's HTTP timeout after verified consecutive 12-second origin timeouts. 2026-11-09.
 Deploy David's single transient retry, durable incident cooldown, and sustained recovery verification. 2026-11-09.
+Deploy David's canonical URL and alternate-network fallback with shared D1 ingestion safeguards (PR #19). 2026-11-10.
