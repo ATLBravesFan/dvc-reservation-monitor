@@ -1,5 +1,6 @@
 import { boundedFetch } from "./bounded-fetch.js";
-import { nextDavidsIncident, withDavidsRetry } from "./davids-reliability.js";
+import { nextDavidsIncident, withDavidsRetry, isTransientDavidsFailure } from "./davids-reliability.js";
+import { dispatchDavidsBackup } from "./davids-backup-dispatch.js";
 import { dailyCadenceReport } from "./daily-cadence-report.js";
 import { getAllWatchTimingReport } from "./all-watch-timing.js";
 import { recordDvcShopObservations, recordDvcShopAlertSends, getDvcShopPublicationReport } from "./dvc-shop-publication-audit.js";
@@ -67,6 +68,30 @@ export default {
       if (!authorized(request, env.ADMIN_TOKEN)) return new Response("Unauthorized", { status: 401 });
       const mode = url.searchParams.get("mode") || "all";
       return json(await runManual(env, store, mode));
+    }
+
+    if (url.pathname === "/ingest/davids-backup" && request.method === "POST") {
+      if (!authorized(request, env.INGEST_TOKEN || env.ADMIN_TOKEN)) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      let body;
+      try { body = await request.json(); }
+      catch { return json({ ok: false, error: "Expected JSON body" }, 400); }
+      if (typeof body?.html !== "string" || !body.html.trim() || body.html.length > 2_000_000) {
+        return json({ ok: false, error: "Expected bounded, non-empty David's HTML" }, 400);
+      }
+      const parsed = parseDavids(body.html);
+      if (!parsed.length) return json({ ok: false, error: "David's backup parser returned zero reservations" }, 422);
+      try {
+        // Exactly the same tracked source, inventory guard, snapshot and outbox
+        // as the primary poll: no secondary alert namespace or new baseline.
+        const result = await tracked(env, store, "davids",
+          () => processStandardWatch(env, store, "davids", WATCHES.davids, parsed));
+        return json(result?.skipped ? { ok: false, ...result } : { ok: true, ...result },
+          result?.skipped ? 409 : 200);
+      } catch (error) {
+        return json({ ok: false, error: errorMessage(error) }, 500);
+      }
     }
 
     if (url.pathname === "/ingest/dvc-rental-store-website" && request.method === "POST") {
@@ -435,6 +460,15 @@ async function pollDavids(env, store) {
       return processStandardWatch(env, store, "davids", WATCHES.davids, rows);
     });
   } catch (error) {
+    // GitHub reaches David's on an independent network if the Cloudflare
+    // request times out. Dispatch only transient errors, not parser failures.
+    if (isTransientDavidsFailure(error)) {
+      try {
+        await dispatchDavidsBackup(env);
+      } catch (backupError) {
+        console.error("David's alternate-network dispatch failed", errorMessage(backupError));
+      }
+    }
     return { ok: false, error: errorMessage(error) };
   }
 }

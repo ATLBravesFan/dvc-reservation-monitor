@@ -12,7 +12,7 @@ export function isTransientDavidsFailure(error) {
   const status = Number(error?.status);
   if (Number.isFinite(status) && status >= 400) return RETRYABLE_STATUSES.has(status);
   const message = error instanceof Error ? error.message : String(error);
-  return /HTTP timeout after|fetch failed|failed to fetch|network error|connection reset|ECONNRESET|ETIMEDOUT|socket hang up|operation was aborted|AbortError/i.test(message);
+  return /HTTP timeout after|timed out|timeout|fetch failed|failed to fetch|network error|connection reset|ECONNRESET|ETIMEDOUT|socket hang up|operation was aborted|AbortError/i.test(message);
 }
 
 export async function withDavidsRetry(fetchPage, sleep = ms => new Promise(resolve => setTimeout(resolve, ms))) {

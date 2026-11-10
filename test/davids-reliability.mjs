@@ -9,6 +9,8 @@ const step = (state, ok, minute, failures = 0) =>
 assert.equal(isTransientDavidsFailure(errorWithStatus(522)), true);
 assert.equal(isTransientDavidsFailure(errorWithStatus(503)), true);
 assert.equal(isTransientDavidsFailure(new Error("HTTP timeout after 30000ms")), true);
+assert.equal(isTransientDavidsFailure(new Error("The operation timed out")), true);
+assert.equal(isTransientDavidsFailure(new Error("TimeoutError: timed out")), true);
 assert.equal(isTransientDavidsFailure(errorWithStatus(404)), false);
 assert.equal(isTransientDavidsFailure(errorWithStatus(429)), false, "do not hammer a rate-limited source");
 assert.equal(isTransientDavidsFailure(new Error("parser returned zero reservations")), false);

@@ -1,0 +1,32 @@
+name: David's alternate-network recovery
+
+on:
+  workflow_dispatch:
+  # Retain a one-time deployment verification hook. Only runs when specifically
+  # updating the marker, never on a GitHub cron schedule.
+  push:
+    branches: [main]
+    paths:
+      - ".github/run-davids-verification.once"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dvc-davids-alternate-network
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Read David's on alternate network and ingest through existing D1 watch
+        run: node scripts/davids-alternate-network.mjs
+        env:
+          DVC_MONITOR_BASE_URL: ${{ secrets.DVC_MONITOR_BASE_URL }}
+          DVC_MONITOR_INGEST_TOKEN: ${{ secrets.DVC_MONITOR_INGEST_TOKEN }}
