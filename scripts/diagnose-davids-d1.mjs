@@ -26,16 +26,17 @@ const databases = await api("/d1/database?name=dvc-monitor-state&per_page=100&pa
 const matches = (databases || []).filter(db => db.name === "dvc-monitor-state");
 if (matches.length !== 1 || !matches[0].uuid) throw Error("Unable to locate one DVC D1 database");
 
+const windowStart = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
 const query = await api("/d1/database/" + matches[0].uuid + "/query", {
   method: "POST",
   body: JSON.stringify({
     sql: "SELECT started_at,outcome,error FROM execution_history " +
       "WHERE source='davids' AND julianday(started_at) >= julianday(?) " +
-      "ORDER BY started_at ASC LIMIT 1500",
-    params: ["2026-11-07T00:00:00.000Z"],
+      "ORDER BY started_at DESC LIMIT 1500",
+    params: [windowStart],
   }),
 });
-const rows = query?.[0]?.results;
+const rows = query?.[0]?.results?.reverse();
 if (!Array.isArray(rows)) throw Error("D1 did not return diagnostic rows");
 const newRetryDeployed = "2026-11-09T18:40:32Z";
 function classify(message) {
@@ -72,7 +73,7 @@ for (const row of rows) {
 const result = {
   asOf: new Date().toISOString(),
   deployedAt: newRetryDeployed,
-  windowStart: "2026-11-07T00:00:00.000Z",
+  windowStart,
   source: "Cloudflare D1 execution_history",
   totalRows: rows.length,
   groups: [...counts.values()].sort((a,b) => a.phase.localeCompare(b.phase) || a.outcome.localeCompare(b.outcome)),
