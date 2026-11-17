@@ -164,7 +164,7 @@ function runScheduled(env, now, ctx) {
   if (tenMinuteCycle) jobs.push(["rentalStoreAll", () => runManual(env, store, "rental-store-all")]);
   if (fiveMinuteCycle) {
     jobs.push(["rentalStoreWebsiteDispatch", () => tracked(env, store, "rental-store-website-dispatch", () => dispatchRentalStoreWebsiteBackup(env))]);
-    jobs.push(["davids", () => pollDavids(env, store)]);
+    jobs.push(["davids", () => pollDavidsPreferAlternate(env, store)]);
   }
 
   // The heartbeat is non-critical; it must never block scheduling.
@@ -448,6 +448,32 @@ async function processRentalStoreWebsite(env, store, rows) {
     alerts: delivery.sent,
     deferred: delivery.deferred,
   };
+}
+
+// Prefer the independently reachable GitHub network. Dispatch is not proof of
+// ingestion: if David's has not actually succeeded in D1 for 8 minutes, fall
+// back to the original Cloudflare poll so GitHub delays cannot silently blind us.
+// Keep the same tracked 'davids' ingestion, snapshot and outbox on both paths.
+async function pollDavidsPreferAlternate(env, store) {
+  let dispatched = false;
+  try {
+    const result = await dispatchDavidsBackup(env);
+    dispatched = Boolean(result?.ok || result?.reason === "recent-dispatch");
+  } catch (error) {
+    console.error("David's preferred alternate dispatch failed", errorMessage(error));
+  }
+  if (dispatched) {
+    try {
+      const health = (await store.allHealth()).find(row => row.source === "davids");
+      const lastSuccess = Date.parse(health?.lastSuccessAt || "");
+      if (Number.isFinite(lastSuccess) && Date.now() - lastSuccess < 8 * 60 * 1000) {
+        return { ok: true, pendingAlternateIngestion: true, lastSuccessAt: health.lastSuccessAt };
+      }
+    } catch (error) {
+      console.error("David's alternate freshness check failed", errorMessage(error));
+    }
+  }
+  return pollDavids(env, store);
 }
 
 async function pollDavids(env, store) {
