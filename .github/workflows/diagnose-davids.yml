@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/diagnose-davids.yml"
+      - "scripts/diagnose-davids-d1.mjs"
 
 permissions:
   contents: read
