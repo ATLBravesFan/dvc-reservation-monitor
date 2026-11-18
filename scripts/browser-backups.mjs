@@ -67,8 +67,26 @@ async function scrapeRentalStore(context) {
   ];
 
   for (const url of urls) {
-    const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-    console.log(`Rental Store page ${url}: HTTP ${response?.status() ?? "unknown"}, title=${JSON.stringify(await page.title())}`);
+    let response;
+    try {
+      // The site sometimes never fires DOMContentLoaded for GitHub-hosted
+      // browsers. Commit navigation as soon as response headers arrive so a
+      // stalled page cannot consume the entire browser-backup attempt.
+      response = await page.goto(url, { waitUntil: "commit", timeout: 25000 });
+      await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(error => {
+        console.warn(`Rental Store DOM readiness delayed for ${url}: ${String(error)}`);
+      });
+      if (!(await page.locator("body").count().catch(() => 0))) {
+        console.warn(`Rental Store page has no body yet: ${url}; trying alternate listing page`);
+        continue;
+      }
+    } catch (error) {
+      // Do not retry the same hung page three times without trying the site's
+      // alternate confirmed-reservations URL first.
+      console.warn(`Rental Store navigation unavailable for ${url}: ${String(error)}`);
+      continue;
+    }
+    console.log(`Rental Store page ${url}: HTTP ${response?.status() ?? "unknown"}, title=${JSON.stringify(await page.title().catch(() => "unavailable"))}`);
     await page.waitForTimeout(5000);
     await dismissRentalStorePopups(page);
 
@@ -108,7 +126,7 @@ async function scrapeRentalStore(context) {
   }
 
   if (!captured.length) {
-    const body = clean((await page.locator("body").innerText().catch(() => ""))).slice(0, 1200);
+    const body = clean((await page.locator("body").innerText({ timeout: 3000 }).catch(() => ""))).slice(0, 1200);
     console.log(`Rental Store diagnostic URL: ${page.url()}`);
     console.log(`Rental Store JSON responses seen: ${jsonUrls.size}`);
     console.log(`Rental Store body sample: ${JSON.stringify(body)}`);
