@@ -56,12 +56,12 @@ jobs:
               sleep 15
             fi
           done
-          # Cloudflare 520 and an empty/partial website are upstream availability
+          # Cloudflare 52x, navigation timeouts, and empty pages are upstream availability
           # problems, not evidence that our primary API monitor has failed.
           # Keep the last good D1 snapshot and avoid repeated GitHub failure
           # notifications for this optional browser backup. Log a visible warning
           # so persistent site issues remain diagnosable.
-          if grep -Eq "HTTP 520|returned zero reservations|usable reservations: 0" "$log_file"; then
+          if grep -Eq "HTTP 52[0-4]|returned zero reservations|usable reservations: 0|page\.goto: Timeout|Rental Store navigation unavailable" "$log_file"; then
             echo "::warning title=Rental Store website temporarily unavailable::Browser backup could not obtain complete inventory after three attempts. No snapshot was ingested; primary API monitoring is unaffected. Check backup freshness if this persists."
             exit 0
           fi
