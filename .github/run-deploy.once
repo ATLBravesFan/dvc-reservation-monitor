@@ -28,3 +28,4 @@ Deploy source-specific 30-second David's HTTP timeout after verified consecutive
 Deploy David's single transient retry, durable incident cooldown, and sustained recovery verification. 2026-11-09.
 Deploy David's canonical URL and alternate-network fallback with shared D1 ingestion safeguards (PR #19). 2026-11-10.
 Deploy David's preferred GitHub-network ingestion with 8-minute D1 freshness fallback. 2026-11-17.
+Deploy Rental Store website ingest JSON diagnostics and accurate health classification for advisory DVC Shop timing gaps (PR #20). 2026-11-19.
