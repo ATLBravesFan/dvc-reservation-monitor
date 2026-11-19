@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import {
   parsePublicationPosts, evaluateDvcShopPublication,
   recordDvcShopObservations, recordDvcShopAlertSends,
+  publicationAuditNeedsOperationalAttention,
 } from "../src/dvc-shop-publication-audit.js";
 
 const raw = [
@@ -30,6 +31,14 @@ assert.equal(evaluated.state,"notified");
 assert.equal(evaluated.detectionMinutes,4);
 assert.equal(evaluated.notificationMinutes,5+19/60);
 assert.equal(evaluateDvcShopPublication(post,{now:at,enabledAt:"2026-10-19T00:00:00.000Z"}).state,"historical");
+
+// A historical first-seen timestamp gap should not put a healthy monitor
+// in CHECK REQUIRED, while a truly unseen/unnotified listing still should.
+assert.equal(publicationAuditNeedsOperationalAttention({rows:[{state:"seen-without-first-seen-time"}]}),false);
+assert.equal(publicationAuditNeedsOperationalAttention({rows:[{state:"notified"}]}),false);
+assert.equal(publicationAuditNeedsOperationalAttention({rows:[{state:"unnotified"}]}),true);
+assert.equal(publicationAuditNeedsOperationalAttention({rows:[{state:"published-not-detected"}]}),true);
+assert.equal(publicationAuditNeedsOperationalAttention({rows:[]}),false);
 
 // Confirm only new / newly available listings issue audit writes, not every
 // listing in a ~500-row five-minute poll. This preserves free D1 write limits.
