@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { boundedFetch } from "../src/bounded-fetch.js";
 import { assertInventoryHealthy } from "../src/inventory-guard.js";
+import worker from "../src/index.js";
 
 const originalFetch=globalThis.fetch;
 const row=id=>({id,checkIn:"2027-01-01",checkOut:"2027-01-03",total:300});
@@ -24,5 +25,20 @@ try {
   assert.throws(()=>assertInventoryHealthy(null,[{...row("x"),total:-1}],"fault-test"),/invalid price/);
   assert.throws(()=>assertInventoryHealthy(null,[{...row("x"),checkOut:"2026-01-01"}],"fault-test"),/invalid dates/);
   assert.doesNotThrow(()=>assertInventoryHealthy(prior,Array.from({length:25},(_,i)=>row(String(i))),"fault-test"),"legitimate inventory changes should not be rejected indiscriminately");
+  // Ingestion failures must remain HTTP 500 for the backup workflow, but
+  // carry a useful JSON explanation rather than the generic Cloudflare page.
+  const failedIngest = await worker.fetch(
+    new Request("https://worker.test/ingest/dvc-rental-store-website", {
+      method:"POST",
+      headers:{Authorization:"Bearer test-token","Content-Type":"application/json"},
+      body:JSON.stringify({listings:[{id:"a0fVJ000004NVSDYA4",resort:"Boardwalk",
+        room:"Studio",checkIn:"2027-01-01",checkOut:"2027-01-03",nights:2,total:300}]}),
+    }),
+    {INGEST_TOKEN:"test-token",DB:{prepare(){throw new Error("simulated D1 ingestion failure");}}},
+  );
+  assert.equal(failedIngest.status,500,"D1 failure must not be acknowledged as successful");
+  const ingestError = await failedIngest.json();
+  assert.equal(ingestError.ok,false);
+  assert.match(ingestError.error,/simulated D1 ingestion failure/);
   console.log("Upstream and inventory fault-injection tests passed");
 } finally {globalThis.fetch=originalFetch;}

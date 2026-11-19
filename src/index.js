@@ -3,7 +3,7 @@ import { nextDavidsIncident, withDavidsRetry, isTransientDavidsFailure } from ".
 import { dispatchDavidsBackup } from "./davids-backup-dispatch.js";
 import { dailyCadenceReport } from "./daily-cadence-report.js";
 import { getAllWatchTimingReport } from "./all-watch-timing.js";
-import { recordDvcShopObservations, recordDvcShopAlertSends, getDvcShopPublicationReport } from "./dvc-shop-publication-audit.js";
+import { recordDvcShopObservations, recordDvcShopAlertSends, getDvcShopPublicationReport, publicationAuditNeedsOperationalAttention } from "./dvc-shop-publication-audit.js";
 import { URLS, WATCHES, EMAIL_LIMITS, SOURCE_EXPECTED_MINUTES } from "./config.js";
 import { parseKeyholder, parseExternalRentalStore, parseDavids, parseDvcShop, fingerprint, formatListing, priceSummary, byId } from "./parsers.js";
 import { Storage, utcDay } from "./storage.js";
@@ -101,8 +101,15 @@ export default {
       if (!Array.isArray(rows)) return json({ ok: false, error: "Expected listings array" }, 400);
       const parsed = parseExternalRentalStore(rows);
       if (!parsed.length) return json({ ok: false, error: "No usable Rental Store website reservations" }, 400);
-      const result = await tracked(env, store, "rental-store-website", () => processRentalStoreWebsite(env, store, parsed));
-      return json(result?.skipped ? { ok: false, ...result } : { ok: true, ...result }, result?.skipped ? 409 : 200);
+      try {
+        const result = await tracked(env, store, "rental-store-website", () => processRentalStoreWebsite(env, store, parsed));
+        return json(result?.skipped ? { ok: false, ...result } : { ok: true, ...result }, result?.skipped ? 409 : 200);
+      } catch (error) {
+        // Preserve the failure for GitHub monitoring, but return an actionable
+        // error instead of an uninformative Cloudflare "Worker threw exception" page.
+        console.error("Rental Store website ingestion failed", errorMessage(error));
+        return json({ ok: false, error: errorMessage(error) }, 500);
+      }
     }
 
     if (url.pathname === "/ingest/dvc-rental" && request.method === "POST") {
@@ -809,7 +816,10 @@ async function statusResponse(env, store, html) {
   const watchActivity = await Promise.all(watchKeys.map(key => store.getMeta(`watch-events:${key}`)));
   const lastScheduled = await store.getMeta("last-scheduled");
   const lastScheduledStart = await store.getMeta("last-scheduled-start");
-  const degraded = healthWithStale.some(item => !item.ok || item.stale || item.consecutiveFailures >= 3) || (outbox.uncertain || 0) > 0 || publicationAudit.summary.reviewNeeded > 0;
+  // Historical timing gaps still appear in the audit, but cannot by themselves
+  // imply that live reservation detection or alert delivery is down.
+  const degraded = healthWithStale.some(item => !item.ok || item.stale || item.consecutiveFailures >= 3) ||
+    (outbox.uncertain || 0) > 0 || publicationAuditNeedsOperationalAttention(publicationAudit);
 
   const payload = {
     ok: !degraded,
