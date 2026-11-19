@@ -173,6 +173,14 @@ export function evaluateDvcShopPublication(row, { now = new Date(), enabledAt, c
   return { state, detectionMinutes, notificationMinutes };
 }
 
+// A record seen in the current snapshot without a historical first-seen
+// timestamp is an audit coverage gap, not proof that an alert was missed.
+// Keep it in reviewNeeded for diagnostics, but not in operational health.
+export function publicationAuditNeedsOperationalAttention(report) {
+  return Boolean(report?.rows?.some(row =>
+    row.state === "unnotified" || row.state === "published-not-detected"));
+}
+
 export async function getDvcShopPublicationReport(db, { limit = RECENT_LIMIT, at = new Date() } = {}) {
   const store = new Storage(db);
   const enabledAt = await store.getMeta(START_KEY);
